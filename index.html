@@ -1,0 +1,1814 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SCT 代理商全景工作台 (本地独立版)</title>
+  
+  <!-- 引入 TailwindCSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- 引入 React 和 ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  
+  <!-- 引入 Babel 使得浏览器可以直接解析 JSX 代码 -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- 引入 Lucide React 图标库 -->
+  <script src="https://unpkg.com/lucide-react@latest/dist/umd/lucide-react.min.js"></script>
+
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif; background: #f8fafc; color: #0f172a; }
+  </style>
+</head>
+<body>
+  <!-- React 应用挂载点 -->
+  <div id="root"></div>
+
+  <!-- 在这里书写 React 代码 -->
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef } = React;
+    // 从引入的 umd 包中解构出所需的图标 (在浏览器环境下通常挂载在 window.lucideReact 命名空间下)
+    const {
+      Search, Upload, Plus, Copy, Check, ExternalLink, AlertTriangle, FileText,
+      Package, Users, Filter, Download, RefreshCw, Edit3, Trash2, Key,
+      CreditCard, Activity, Clock, CheckCircle2, X, ChevronRight, ChevronLeft,
+      Layers, ClipboardPaste, Sparkles, Building2, Phone, MapPin, ShieldAlert,
+      Table, Eye, FileSpreadsheet, FileCheck, FolderOpen, Globe, ArrowLeft,
+      BarChart3, HardDriveDownload, File
+    } = window.lucideReact;
+
+    // ==========================================
+    // 外部系统地址常量（纯字符串构造，无外部请求）
+    // ==========================================
+    const RESELLER_PORTAL_URL = 'https://' + 'agent.npnchina.com/';
+
+    // ==========================================
+    // IndexedDB 本地文件持久层（支持存储大体积PDF合同、图片、表格）
+    // ==========================================
+    const DB_NAME = 'SCT_Agent_Workbench_DB';
+    const DB_VERSION = 1;
+    const FILE_STORE = 'agent_files';
+
+    function openFileDB() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(FILE_STORE)) {
+            db.createObjectStore(FILE_STORE, { keyPath: 'id' });
+          }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function saveFileToDB(fileRecord) {
+      try {
+        const db = await openFileDB();
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction(FILE_STORE, 'readwrite');
+          tx.objectStore(FILE_STORE).put(fileRecord);
+          tx.oncomplete = () => resolve(true);
+          tx.onerror = () => reject(tx.error);
+        });
+      } catch (e) {
+        console.error('IndexedDB save error:', e);
+        return false;
+      }
+    }
+
+    async function getAllFilesFromDB() {
+      try {
+        const db = await openFileDB();
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction(FILE_STORE, 'readonly');
+          const req = tx.objectStore(FILE_STORE).getAll();
+          req.onsuccess = () => resolve(req.result || []);
+          req.onerror = () => reject(req.error);
+        });
+      } catch (e) {
+        console.error('IndexedDB read error:', e);
+        return [];
+      }
+    }
+
+    async function deleteFileFromDB(id) {
+      try {
+        const db = await openFileDB();
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction(FILE_STORE, 'readwrite');
+          tx.objectStore(FILE_STORE).delete(id);
+          tx.oncomplete = () => resolve(true);
+          tx.onerror = () => reject(tx.error);
+        });
+      } catch (e) {
+        console.error('IndexedDB delete error:', e);
+        return false;
+      }
+    }
+
+    // ==========================================
+    // 初始内置数据
+    // ==========================================
+    const INITIAL_AGENTS = [
+      {
+        id: 'SCT0079',
+        seq: 1,
+        name: '安总',
+        status: 'low_demand',
+        contact: '安总',
+        address: '无',
+        cardFee: 'eSIM：5 RMB',
+        settlement: '套餐结算',
+        contractStatus: '未提及',
+        needsContractRenewal: false,
+        totalCardsIssued: 0,
+        cardVolumeSummary: '出卡极少 (未激活可退)',
+        keyAlert: '退款直接群里 @财务丽容；SIM免卡费',
+        operationsNote: '出卡量很少，很久没出过。偶尔会在群里问退款，如未激活使用，可以退，在群里@财务丽容退就行。eSIM收5 RMB/张，SIM卡 不收费，套餐价格包含卡费。',
+        tags: ['eSIM: 5 RMB/张', 'SIM卡免卡费', '未激活可退(@财务丽容)'],
+        highlights: [
+          '如未激活使用可以退款，直接在群里 @财务丽容 办理退款即可。',
+          'eSIM收 5 RMB/张，实体SIM卡不收费（套餐价含卡费）。'
+        ],
+        packages: [],
+        cardLogs: [
+          {
+            id: 'LOG-0079-1',
+            date: '历史交接',
+            type: '售后/出卡规则',
+            quantity: 0,
+            pkgName: 'eSIM (5 RMB/张) / SIM卡 (免卡费)',
+            note: '出卡量很少，未激活使用可直接在群里@财务丽容退'
+          }
+        ]
+      },
+      {
+        id: 'SCT0161',
+        seq: 2,
+        name: 'Future Power',
+        status: 'low_demand',
+        contact: 'Eddy Wo，60607070',
+        address: 'Unit 6B, 6/F, Union Building, No.112 How Ming Street, Kwun Tong, Kowloon, Hong Kong',
+        cardFee: '*',
+        settlement: '流量结算',
+        contractStatus: '有签合同，需更新',
+        needsContractRenewal: true,
+        totalCardsIssued: 0,
+        cardVolumeSummary: '换ORG后少用 (月度催款)',
+        keyAlert: '⚠️ 合同需更新 · 详情可问谢总',
+        operationsNote: '我接手后，没有需求。去年年底通知了换ORG后就基本没怎么用。偶尔使用了财务会发月度账单催付款。这个代理详细事情可以问谢总。有签合同，需更新。',
+        tags: ['换ORG后少用', '财务月度账单催款', '详情问谢总', '合同需更新'],
+        highlights: [
+          '历史细节可咨询谢总；偶有使用由财务发月度账单催收。',
+          '合同状态：有签合同，需跟进更新。'
+        ],
+        packages: [],
+        cardLogs: []
+      },
+      {
+        id: 'SCT0175',
+        seq: 3,
+        name: '杰元生活馆',
+        status: 'active',
+        contact: '薛元閔，912163252',
+        address: 'No. 44, Ln. 42, Buhou St., Zuoying Dist., Kaohsiung City 813007, Taiwan (R.O.C.)，E122411619身份證',
+        cardFee: '3 HKD',
+        settlement: '套餐结算',
+        contractStatus: '有签合同，需更新',
+        needsContractRenewal: true,
+        portalUrl: RESELLER_PORTAL_URL,
+        totalCardsIssued: 120,
+        cardVolumeSummary: '近期量升 · 已划3000HKD至转售网',
+        keyAlert: '⚠️ 合同需更新 · 台湾卡需交非台营业执照',
+        operationsNote: '主出eSIM，最近开通了转售卡系统账户给代理，从代理商账户划转了3000港元到转售卡系统。最近量稍微多点。代理有出台湾卡的想法，需要提供非台湾公司的营业执照，有提醒过，暂时还没发来。有签合同，需更新。',
+        tags: ['主出eSIM', '已开通转售卡系统', '已划转3000 HKD', '台湾卡待交非台执照', '合同需更新'],
+        highlights: [
+          '已开通转售卡系统账户（已从代理商账户划转 3000 HKD 到转售卡系统），近期出量有所上升。',
+          '代理有出【台湾卡】意向：必须提供【非台湾公司的营业执照】（已提醒，待代理提交）。',
+          '合同状态：有签合同，需更新。'
+        ],
+        packages: [],
+        cardLogs: [
+          {
+            id: 'LOG-0175-1',
+            date: '2025-10',
+            type: '转售系统划转/出卡',
+            quantity: 120,
+            pkgName: 'eSIM 转售卡系统出卡',
+            note: '从代理商账户划转 3,000 HKD 到转售卡系统，近期出卡量有所上升'
+          }
+        ]
+      },
+      {
+        id: 'SCT0259',
+        seq: 4,
+        name: '南方旅游',
+        status: 'active',
+        contact: 'Tammy (旅游部)',
+        address: '香港公司',
+        cardFee: '套餐价含卡费',
+        settlement: '套餐结算',
+        contractStatus: '内部协同部门',
+        needsContractRenewal: false,
+        credentials: {
+          account: 'sct0259',
+          password: '259qwe'
+        },
+        totalCardsIssued: 300,
+        cardVolumeSummary: '常出帕劳卡 · 发一单充一单',
+        keyAlert: '🔑 账号sct0259 · 常用ID:330259005 · 盯白卡备货',
+        operationsNote: '这个代理号是给旅游部Tammy他们出帕劳卡的，有需求就帮他们申请，需要代发，香港是Hilda代发，深圳代发未知交接给谁。白卡和卡封套数量不足要及时备货，通常是发一单充值一单（记得充值，最常用的就是ID：330259005-港澳帕劳12天10GB），账户余额不足跟姚总说一下加余额，同意后找丽容加。代理商账号：sct0259 密码： 259qwe',
+        tags: ['主出帕劳卡', '需代发(香港Hilda)', '发一单充一单', '白卡/封套及时备货', '余额找姚总批->丽容加'],
+        highlights: [
+          '【发一单充值一单】切记每次发卡后同步充值！最常用套餐ID：330259005（港澳帕劳12天10GB）。',
+          '【余额充值流程】账户余额不足时，先跟姚总报备申请，同意后找财务丽容加余额。',
+          '【代发与备货】香港由 Hilda 代发；需盯紧白卡和卡封套库存，不足及时备货。'
+        ],
+        packages: [
+          {
+            id: '330259005',
+            name: '港澳帕劳12天10GB',
+            region: '港澳 / 帕劳',
+            days: '12天',
+            data: '10GB',
+            price: '套餐价含卡费',
+            cardType: '实体白卡 (配卡封套)',
+            remark: '最常用主力套餐，记得发一单充值一单'
+          }
+        ],
+        cardLogs: [
+          {
+            id: 'LOG-0259-1',
+            date: '日常持续出卡',
+            type: '实体白卡代发',
+            quantity: 300,
+            pkgName: '330259005 - 港澳帕劳12天10GB',
+            note: '香港由Hilda代发，发一单充值一单；注意白卡和卡封套及时备货'
+          }
+        ]
+      },
+      {
+        id: 'SCT0288',
+        seq: 5,
+        name: 'ICS',
+        status: 'low_demand',
+        contact: '无',
+        address: '无',
+        cardFee: '*',
+        settlement: '套餐结算',
+        contractStatus: '未提及',
+        needsContractRenewal: false,
+        totalCardsIssued: 0,
+        cardVolumeSummary: '出卡极少 (偶发水单充值)',
+        keyAlert: '偶尔发水单充值余额，无新增需求',
+        operationsNote: '我接手时就没有资料，没有新增需求。代理偶尔会发水单来充值余额，出卡量很少。',
+        tags: ['偶尔水单充值', '无新增需求', '出卡极少'],
+        highlights: ['代理偶尔会直接发银行水单来充值账户余额，日常无新增套餐需求。'],
+        packages: [],
+        cardLogs: []
+      },
+      {
+        id: 'SCT0315',
+        seq: 6,
+        name: 'GLOBEE LIMITED',
+        status: 'active',
+        contact: '杨韵怡，amy.yang' + '@' + 'aotech.co',
+        address: '无，代理在深圳办公',
+        cardFee: '3 HKD',
+        settlement: '流量结算',
+        contractStatus: '8月重签合同(12月考核平台费)',
+        needsContractRenewal: false,
+        totalCardsIssued: 0,
+        cardVolumeSummary: '已付押金5万HKD · 待正式起量',
+        keyAlert: '📋 需回填客户需求表 · 12月起平台费考核(问杨总)',
+        operationsNote: '有付过押金5万港元。爱提需求，但一直未正式起步出卡（主出eSIM），他们有自己的需求表，我们申请完后再填到他们的需求表上。8月沟通后重新签了合同，三个月免平台费，12月开始未达到销售额要收取，具体问杨总。',
+        tags: ['已付押金5万HKD', '主出eSIM', '需回填客户需求表', '12月起平台费考核(问杨总)'],
+        highlights: [
+          '已付押金 50,000 HKD，深圳办公，主出 eSIM。',
+          '【操作规范】代理有自己格式的需求表，我们内部申请完套餐后，需回填到他们的需求表上。',
+          '【重要节点】8月重签合同享3个月免平台费，12月起未达销售额需收取平台费（具体标准问杨总）。'
+        ],
+        packages: [],
+        cardLogs: [
+          {
+            id: 'LOG-0315-1',
+            date: '2025-08',
+            type: '押金与合同重签',
+            quantity: 0,
+            pkgName: '已付押金 50,000 HKD (主出eSIM)',
+            note: '8月重签合同免3个月平台费，12月开始未达销售额需收平台费'
+          }
+        ]
+      },
+      {
+        id: 'SCT0316',
+        seq: 7,
+        name: '未来通讯技术',
+        status: 'active',
+        contact: '向敏，xm13681152536' + '@' + '126.com',
+        address: '金钟道89号力宝中心2座1204B室',
+        cardFee: '3 HKD',
+        settlement: '流量结算',
+        contractStatus: '有签合同，需更新',
+        needsContractRenewal: true,
+        totalCardsIssued: 50,
+        cardVolumeSummary: '主出带香港号码eSIM',
+        keyAlert: '⚠️ 合同需更新 · 黄总朋友 · 主出香港号套餐',
+        operationsNote: '黄总朋友，主要出带香港号码的套餐。eSIM为主，SIM卡较少。总体出的卡也不多，有签合同，需更新。',
+        tags: ['黄总朋友', '带香港号码套餐', '主出eSIM', '合同需更新'],
+        highlights: [
+          '黄总朋友，与 SCT0344 (INOMAAS) 原属同一家公司，后拆分独立。',
+          '主打【带香港号码】的套餐产品，以 eSIM 为主。',
+          '合同状态：有签合同，需更新。'
+        ],
+        packages: [],
+        cardLogs: [
+          {
+            id: 'LOG-0316-1',
+            date: '日常出卡',
+            type: 'eSIM为主',
+            quantity: 50,
+            pkgName: '带香港号码 eSIM 套餐',
+            note: '黄总朋友，eSIM为主，SIM卡较少'
+          }
+        ]
+      },
+      {
+        id: 'SCT0334',
+        seq: 8,
+        name: 'NEWTECH LIFE LIMITED',
+        status: 'active',
+        contact: '刘丽，alice.liu' + '@' + 'newtechlife.net',
+        address: 'Room 701, Unit 127, 7/F, Tower B, New Mandarin Plaza, 14 Science Museum Road, Tsim Sha Tsui, Kowloon',
+        cardFee: '2 HKD',
+        settlement: '流量结算',
+        contractStatus: '已签有效合同',
+        needsContractRenewal: false,
+        totalCardsIssued: 60,
+        cardVolumeSummary: '主出台湾卡 · API对接中',
+        keyAlert: '🔌 常问API对接(群内有开发) · 主出台湾卡',
+        operationsNote: '爱提需求，经常问API对接的事，群里有开发在。主要出台湾卡，量也不大。有签合同。',
+        tags: ['常问API对接', '主出台湾卡', '群内有开发', '已签合同'],
+        highlights: ['经常咨询 API 对接相关问题（对接群内已有技术人员跟进），业务主出台湾卡。'],
+        packages: [],
+        cardLogs: [
+          {
+            id: 'LOG-0334-1',
+            date: '日常出卡',
+            type: '台湾卡',
+            quantity: 60,
+            pkgName: '台湾流量套餐 (API对接)',
+            note: '主要出台湾卡，群内有开发对接API'
+          }
+        ]
+      },
+      {
+        id: 'SCT0338',
+        seq: 9,
+        name: 'Sim International',
+        status: 'low_demand',
+        contact: 'Mr. Son Nguyen，+84 396931192',
+        address: '64A Alley number 530, Thuy Khue Street, Tay Ho District, Hanoi, Vietnam',
+        cardFee: '*',
+        settlement: '流量结算',
+        contractStatus: '有签合同，需更新',
+        needsContractRenewal: true,
+        totalCardsIssued: 0,
+        cardVolumeSummary: '长期未出卡 (前销售纠纷)',
+        keyAlert: '⚠️ 合同需更新 · 前销售经济纠纷 · 报价未达预期',
+        operationsNote: '跟之前的销售有经济纠纷，现在已经很久没出过卡了。后来有沟通过报价，达不到代理预期。有签合同，需更新。',
+        tags: ['越南代理', '前销售经济纠纷', '报价未达预期', '合同需更新'],
+        highlights: ['与前任销售存在历史经济纠纷，目前已长期停滞未出卡；合同需更新。'],
+        packages: [],
+        cardLogs: []
+      },
+      {
+        id: 'SCT0342',
+        seq: 10,
+        name: 'New Generation (HK) Technology Company Limited',
+        status: 'low_demand',
+        contact: 'Tony Lai，46246795',
+        address: 'Unit 717, 7/F., Peninsula Centre, 67 Mody Road, Tsim Sha Tsui, Hong Kong',
+        cardFee: '*',
+        settlement: '套餐结算',
+        contractStatus: '未提及',
+        needsContractRenewal: false,
+        totalCardsIssued: 0,
+        cardVolumeSummary: '未出过卡 / 无新增需求',
+        keyAlert: '接手后无新增需求，未出过卡',
+        operationsNote: '我接手后，没有新增需求。没出过卡和新增套餐。',
+        tags: ['无新增需求', '未出卡'],
+        highlights: ['接手后暂无任何出卡及新增套餐记录。'],
+        packages: [],
+        cardLogs: []
+      },
+      {
+        id: 'SCT0344',
+        seq: 11,
+        name: 'INOMAAS TECH LIMITED',
+        status: 'active',
+        contact: '孙僮检 | tjsun' + '@' + 'inovai.tech | 15323758517',
+        address: '金钟道89号力宝中心2座1204B室',
+        cardFee: '3 HKD',
+        settlement: '流量结算',
+        contractStatus: '已签有效合同',
+        needsContractRenewal: false,
+        totalCardsIssued: 40,
+        cardVolumeSummary: '主出eSIM (原与316同司)',
+        keyAlert: '主出eSIM · 原与SCT0316同公司后拆分',
+        operationsNote: '之前是跟316一个公司，后来用单独的香港公司申请分开了。主出eSIM，有签合同。',
+        tags: ['原与SCT0316同公司', '主出eSIM', '已签合同'],
+        highlights: ['原与 SCT0316（未来通讯技术）为同一家公司，后用独立香港公司主体拆分。主出 eSIM。'],
+        packages: [],
+        cardLogs: []
+      },
+      {
+        id: 'SCT0353',
+        seq: 12,
+        name: '云栋国际有限公司',
+        status: 'active',
+        contact: '何瑞康，13922201642',
+        address: '无，代理在广州办公',
+        cardFee: '2.5 HKD',
+        settlement: '流量结算',
+        contractStatus: '有签合同，需更新',
+        needsContractRenewal: true,
+        totalCardsIssued: 0,
+        cardVolumeSummary: '已给报价 · 尚未正式出卡',
+        keyAlert: '⚠️ 合同需更新 · 广州办公 · 已给报价待出卡',
+        operationsNote: '给过报价，没正式出卡。有签合同，需更新。',
+        tags: ['广州办公', '已给报价未出卡', '合同需更新'],
+        highlights: ['代理在广州办公，前期已提供报价但尚未正式出卡；合同需更新。'],
+        packages: [],
+        cardLogs: []
+      },
+      {
+        id: 'SCT0378',
+        seq: 13,
+        name: 'DACE GLOBAL CONNECT',
+        status: 'active',
+        contact: 'Billy，60103858018',
+        address: '无',
+        cardFee: '3 HKD',
+        settlement: '套餐结算',
+        contractStatus: '有签合同，需更新',
+        needsContractRenewal: true,
+        portalUrl: RESELLER_PORTAL_URL,
+        totalCardsIssued: 0,
+        cardVolumeSummary: '划转1.5万HKD至转售网(工单中)',
+        keyAlert: '⏳ 15000 HKD划转工单申请中 · ⚠️ 合同需更新',
+        operationsNote: '黄总朋友，代理主出eSIM，开通转售卡账户中，从代理商账户划转15000港元到转售卡账户，工单还在申请中。有签合同，需更新。',
+        tags: ['黄总朋友', '主出eSIM', '转售卡系统开通中', '划转15000HKD工单申请中', '合同需更新'],
+        highlights: [
+          '【工单跟进】正在开通转售卡账户，从代理商账户划转 15,000 HKD 到转售卡账户的工单尚在申请中，需盯进度！',
+          '黄总朋友，主出 eSIM；合同需更新。'
+        ],
+        packages: [],
+        cardLogs: [
+          {
+            id: 'LOG-0378-1',
+            date: '2025-11',
+            type: '账户划转工单',
+            quantity: 0,
+            pkgName: '划转 15,000 HKD 至转售卡账户',
+            note: '开通转售卡账户中，划转工单还在申请中'
+          }
+        ]
+      },
+      {
+        id: 'SCT0393',
+        seq: 14,
+        name: 'NOVACELL SOLUTIONS INC',
+        status: 'low_demand',
+        contact: '大卫',
+        address: '无',
+        cardFee: '0.449000 USD',
+        settlement: '流量结算',
+        contractStatus: '已签有效合同',
+        needsContractRenewal: false,
+        totalCardsIssued: 10,
+        cardVolumeSummary: '前期测试后无声量',
+        keyAlert: '🚫 加拿大公司严禁使用加拿大本地流量',
+        operationsNote: '这个代理是谢总转交过来，接手后前期一直在测试，一直想测加拿大的流量，代理是加拿大公司不允许本地流量。后面没声量了。有签合同。',
+        tags: ['谢总转交', '加拿大公司(禁本地流量)', '卡费0.449 USD', '已签合同'],
+        highlights: ['【合规红线】该代理为加拿大公司，不允许使用加拿大本地流量！前期测试后暂无动静。'],
+        packages: [],
+        cardLogs: []
+      },
+      {
+        id: 'SCT0396',
+        seq: 15,
+        name: '中郵新媒體國際有限公司',
+        status: 'low_demand',
+        contact: 'Philip Kao | Kaophil' + '@' + 'gmail.com | 91556297',
+        address: '无',
+        cardFee: '套餐价含卡费',
+        settlement: '套餐结算',
+        contractStatus: '已签有效合同',
+        needsContractRenewal: false,
+        totalCardsIssued: 30,
+        cardVolumeSummary: '主出eSIM (俄罗斯终端客户)',
+        keyAlert: '客户为俄罗斯人 · 套餐价含卡费 · 主出eSIM',
+        operationsNote: '代理客户是俄罗斯人，套餐价格包含卡费，主出eSIM，有签合同。',
+        tags: ['俄罗斯客户', '套餐价含卡费', '主出eSIM', '已签合同'],
+        highlights: ['终端客户群体为俄罗斯人，主出 eSIM，套餐报价直接包含卡费。'],
+        packages: [],
+        cardLogs: []
+      },
+      {
+        id: 'SCT0398',
+        seq: 16,
+        name: '香港精靈機器人自動化有限公司',
+        status: 'low_demand',
+        contact: '胡祖安 | hu10010' + '@' + 'gmail.com | (852) 63120612',
+        address: '无',
+        cardFee: '2 HKD',
+        settlement: '套餐结算',
+        contractStatus: '已签有效合同',
+        needsContractRenewal: false,
+        totalCardsIssued: 500,
+        cardVolumeSummary: '已出 500 张空白卡 (400 CMI + 100 PMCI)',
+        keyAlert: '🚫 发给代理的产品表必须【去掉FUP】！',
+        operationsNote: '套餐结算，卡费收2 HKD。\n发给代理的产品表去掉FUP。\n2025-10-28 出过400张CMI空白卡、100张PMCI空白卡。有签合同。',
+        tags: ['产品表必须去掉FUP', '已出400张CMI白卡', '已出100张PMCI白卡', '已签合同'],
+        highlights: [
+          '【重要避坑】发给该代理的产品报价表，必须去掉 FUP（公平使用政策）相关字段/说明！',
+          '2025-10-28 已出货：400张 CMI 空白卡、100张 PMCI 空白卡（卡费 2 HKD）。'
+        ],
+        packages: [
+          {
+            id: 'BLANK-CMI-400',
+            name: 'CMI 空白实体卡 (去FUP版产品表)',
+            region: '多国/全球',
+            days: '-',
+            data: '空白白卡',
+            price: '卡费 2 HKD',
+            cardType: 'CMI 空白卡',
+            remark: '2025-10-28 已出400张；注意发给代理的产品表必须去掉FUP'
+          },
+          {
+            id: 'BLANK-PMCI-100',
+            name: 'PMCI 空白实体卡 (去FUP版产品表)',
+            region: '多国/全球',
+            days: '-',
+            data: '空白白卡',
+            price: '卡费 2 HKD',
+            cardType: 'PMCI 空白卡',
+            remark: '2025-10-28 已出100张；注意发给代理的产品表必须去掉FUP'
+          }
+        ],
+        cardLogs: [
+          {
+            id: 'LOG-0398-1',
+            date: '2025-10-28',
+            type: 'CMI 空白卡出货',
+            quantity: 400,
+            pkgName: 'CMI 空白卡 (卡费 2 HKD)',
+            note: '发给代理的产品表必须去掉FUP'
+          },
+          {
+            id: 'LOG-0398-2',
+            date: '2025-10-28',
+            type: 'PMCI 空白卡出货',
+            quantity: 100,
+            pkgName: 'PMCI 空白卡 (卡费 2 HKD)',
+            note: '发给代理的产品表必须去掉FUP'
+          }
+        ]
+      },
+      {
+        id: 'SCT0371',
+        seq: 17,
+        name: 'Solutions4U Global LLP',
+        status: 'dormant',
+        contact: '无',
+        address: '无',
+        cardFee: '*',
+        settlement: '流量结算',
+        contractStatus: '有签合同，需更新',
+        needsContractRenewal: true,
+        totalCardsIssued: 0,
+        cardVolumeSummary: '一年以上无动静',
+        keyAlert: '⚠️ 合同需更新 · 一年以上无动静',
+        operationsNote: '【一年以上没有动静的代理】我接手后，没有需求，有合同，需更新。',
+        tags: ['一年以上无动静', '合同需更新'],
+        highlights: ['属于一年以上无动静代理，有签合同但需更新。'],
+        packages: [],
+        cardLogs: []
+      },
+      {
+        id: 'SCT0264',
+        seq: 18,
+        name: '香港-合成電訊有限公司',
+        status: 'dormant',
+        contact: '佳佳',
+        address: '彌敦道608號總統大廈1401（之前LEO給的地址，不知有沒有變動）',
+        cardFee: '*',
+        settlement: '流量结算',
+        contractStatus: '未提及',
+        needsContractRenewal: false,
+        totalCardsIssued: 0,
+        cardVolumeSummary: '一年以上无动静 (历史纠纷)',
+        keyAlert: '与前销售有经济纠纷，很久未出卡',
+        operationsNote: '【一年以上没有动静的代理】跟之前的销售有经济纠纷，现在已经很久没出过卡了。',
+        tags: ['一年以上无动静', '前销售经济纠纷'],
+        highlights: ['一年以上无动静，且与之前销售存在历史经济纠纷。'],
+        packages: [],
+        cardLogs: []
+      },
+      {
+        id: 'SCT0272',
+        seq: 19,
+        name: 'CHANGI TRAVEL SERVICES PLE.LTD',
+        status: 'dormant',
+        contact: '武藤',
+        address: '新加坡樟宜機場',
+        cardFee: '*',
+        settlement: '套餐结算',
+        contractStatus: '未提及',
+        needsContractRenewal: false,
+        totalCardsIssued: 0,
+        cardVolumeSummary: '一年+无动静 (原价极低纯亏本)',
+        keyAlert: '🚨 历史给价极低纯亏本，重启用务必重谈价格！',
+        operationsNote: '【一年以上没有动静的代理】很久都没动静，这个代理之前的价格给的很低，纯亏本出。',
+        tags: ['一年以上无动静', '新加坡樟宜机场', '历史低价纯亏本'],
+        highlights: ['【价格预警】一年以上无动静，历史给的价格极低属于纯亏本出卡，如重新激活务必重谈价格！'],
+        packages: [],
+        cardLogs: []
+      }
+    ];
+
+    const INITIAL_FILES = [
+      {
+        id: 'DOC-INIT-1',
+        agentId: 'ALL',
+        name: '代理交接文档11-05_全量原表归档.csv',
+        category: '交接归档文件',
+        size: '4.2 KB',
+        uploadDate: '2025-11-05',
+        mimeType: 'text/csv',
+        textContent: [
+          '序号,代理号,代理名称,状态分类,对接人联系方式,卡费,结算方式,合同状态,运营交接重点',
+          '1,SCT0079,安总,很少需求(标灰),安总,eSIM：5 rmb,套餐结算,未提及,未激活可退(@财务丽容)；eSIM收5RMB/SIM免卡费',
+          '2,SCT0161,Future Power,很少需求(标灰),Eddy Wo 60607070,*,流量结算,有签合同需更新,换ORG后少用；财务月度账单催款；详情问谢总',
+          '3,SCT0175,杰元生活馆,主力活跃,薛元閔 912163252,3 HKD,套餐结算,有签合同需更新,主出eSIM；已划转3000HKD至转售系统；出台湾卡需非台营业执照',
+          '4,SCT0259,南方旅游,主力活跃,Tammy,套餐价含卡费,套餐结算,内部协同,出帕劳卡(ID:330259005)；发一单充一单；香港Hilda代发；账号sct0259密码259qwe',
+          '5,SCT0288,ICS,很少需求(标灰),无,*,套餐结算,未提及,偶尔发水单充值余额；无新增需求',
+          '6,SCT0315,GLOBEE LIMITED,主力活跃,杨韵怡 amy.yang@aotech.co,3 HKD,流量结算,8月重签合同,已付押金5万HKD；需回填客户需求表；12月起考核平台费(问杨总)',
+          '7,SCT0316,未来通讯技术,主力活跃,向敏 xm13681152536@126.com,3 HKD,流量结算,有签合同需更新,黄总朋友；主出带香港号码eSIM套餐',
+          '8,SCT0334,NEWTECH LIFE LIMITED,主力活跃,刘丽 alice.liu@newtechlife.net,2 HKD,流量结算,有签合同,常问API对接(群内有开发)；主出台湾卡',
+          '9,SCT0338,Sim International,很少需求(标灰),Mr. Son Nguyen +84 396931192,*,流量结算,有签合同需更新,前销售经济纠纷；报价未达预期',
+          '10,SCT0342,New Generation (HK),很少需求(标灰),Tony Lai 46246795,*,套餐结算,未提及,无新增需求未出卡',
+          '11,SCT0344,INOMAAS TECH LIMITED,主力活跃,孙僮检 15323758517,3 HKD,流量结算,有签合同,原与316同公司后拆分；主出eSIM',
+          '12,SCT0353,云栋国际有限公司,主力活跃,何瑞康 13922201642,2.5 HKD,流量结算,有签合同需更新,广州办公；已给报价未正式出卡',
+          '13,SCT0378,DACE GLOBAL CONNECT,主力活跃,Billy 60103858018,3 HKD,套餐结算,有签合同需更新,黄总朋友；开通转售卡系统及划转15000HKD工单申请中',
+          '14,SCT0393,NOVACELL SOLUTIONS INC,很少需求(标灰),大卫,0.449000 USD,流量结算,有签合同,谢总转交；加拿大公司严禁本地流量',
+          '15,SCT0396,中郵新媒體國際有限公司,很少需求(标灰),Philip Kao 91556297,套餐价含卡费,套餐结算,有签合同,客户是俄罗斯人；主出eSIM',
+          '16,SCT0398,香港精靈機器人自動化有限公司,很少需求(标灰),胡祖安 63120612,2 HKD,套餐结算,有签合同,发给代理的产品表去掉FUP；2025-10-28出400张CMI白卡+100张PMCI白卡',
+          '17,SCT0371,Solutions4U Global LLP,一年+无动静,无,*,流量结算,有签合同需更新,一年以上无动静；合同需更新',
+          '18,SCT0264,香港-合成電訊有限公司,一年+无动静,佳佳,*,流量结算,未提及,一年以上无动静；前销售经济纠纷',
+          '19,SCT0272,CHANGI TRAVEL SERVICES,一年+无动静,武藤,*,套餐结算,未提及,新加坡樟宜机场；历史价格极低纯亏本出'
+        ].join('\n')
+      },
+      {
+        id: 'DOC-INIT-2',
+        agentId: 'SCT0259',
+        name: 'SCT0259_南方旅游_帕劳卡代发与充值操作手册.txt',
+        category: '运营操作规范',
+        size: '1.1 KB',
+        uploadDate: '2025-11-05',
+        mimeType: 'text/plain',
+        textContent: `【SCT0259 南方旅游 - 帕劳卡专项交接指引】
+1. 对应部门与对接人：旅游部 Tammy
+2. 代理商后台登录凭证：
+   - 账号：sct0259
+   - 密码：259qwe
+3. 最常用主力套餐：
+   - 套餐ID：330259005
+   - 套餐名称：港澳帕劳12天10GB
+   - 结算规则：套餐结算（套餐价含卡费）
+4. 发卡与充值核心铁律：
+   - 【发一单充值一单】：每次幫他们申请并发卡后，务必记得同步充值！
+   - 【代发安排】：香港地区由 Hilda 代发；深圳地区代发需确认交接人。
+   - 【物料备货】：白卡和卡封套数量不足时，要提前及时备货。
+   - 【余额加款流程】：当账户余额不足时，先跟姚总汇报申请加余额，姚总同意后找财务丽容加款。`
+      },
+      {
+        id: 'DOC-INIT-3',
+        agentId: 'SCT0398',
+        name: 'SCT0398_香港精灵机器人_出卡记录与去FUP说明.txt',
+        category: '合同文件/报价规范',
+        size: '0.9 KB',
+        uploadDate: '2025-10-28',
+        mimeType: 'text/plain',
+        textContent: `【SCT0398 香港精靈機器人自動化有限公司 - 报价与出卡档案】
+1. 联系人：胡祖安 | 邮箱：hu10010@gmail.com | 电话：(852) 63120612
+2. 结算方式：套餐结算（卡费收 2 HKD/张）
+3. 合同状态：已签合同
+4. 【红线要求】：发给该代理的所有产品报价表，必须去掉 FUP（公平使用政策）说明！
+5. 近期空白卡出货记录：
+   - 出货日期：2025-10-28
+   - 出货明细：400张 CMI 空白卡 + 100张 PMCI 空白卡（合计 500 张）`
+      }
+    ];
+
+    const SAMPLE_PASTE_TEXT = `SCT0175\tPKG-TW-05D\t台湾5天无限流量(2GB/天)\t中国台湾\t5天\t每日2GB后降速\t18.5 HKD\teSIM\t杰元生活馆主力询价套餐
+SCT0175\tPKG-JP-07D\t日本7天10GB高速套餐\t日本\t7天\t10GB\t26.0 HKD\teSIM\t转售卡系统直发
+SCT0316\tPKG-HK-30D-NUM\t香港30天20GB带香港号码套餐\t中国香港\t30天\t20GB+香港号\t45.0 HKD\teSIM\t黄总朋友常用带号套餐
+SCT0334\tPKG-TW-API-03D\t台湾3天总量5GB套餐\t中国台湾\t3天\t5GB\t12.0 HKD\t实体卡/eSIM\tAPI对接调用套餐
+SCT0398\tPKG-SGMY-07D\t新马泰7天10GB套餐(无FUP展示版)\t新马泰\t7天\t10GB\t22.0 HKD\tCMI白卡\t发给客户表已去除FUP字样`;
+
+    const STORAGE_KEY = 'sct_panorama_workbench_v2';
+
+    function App() {
+      // 1. 代理商核心数据状态
+      const [agents, setAgents] = useState(() => {
+        try {
+          const saved = localStorage.getItem(STORAGE_KEY);
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+          }
+        } catch (e) {
+          console.error('Load localStorage error:', e);
+        }
+        return INITIAL_AGENTS;
+      });
+
+      // 2. 文件资料库状态（结合 IndexedDB 持久化）
+      const [files, setFiles] = useState(INITIAL_FILES);
+
+      useEffect(() => {
+        let mounted = true;
+        getAllFilesFromDB().then((dbFiles) => {
+          if (!mounted) return;
+          if (dbFiles && dbFiles.length > 0) {
+            // 合并初始文件与用户上传的持久化文件
+            const existingIds = new Set(dbFiles.map((f) => f.id));
+            const merged = [
+              ...dbFiles,
+              ...INITIAL_FILES.filter((initF) => !existingIds.has(initF.id))
+            ];
+            setFiles(merged);
+          }
+        });
+        return () => {
+          mounted = false;
+        };
+      }, []);
+
+      useEffect(() => {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(agents));
+        } catch (e) {
+          console.error('Save localStorage error:', e);
+        }
+      }, [agents]);
+
+      // 3. 界面导航与过滤状态
+      const [searchQuery, setSearchQuery] = useState('');
+      const [statusFilter, setStatusFilter] = useState('all'); // all | active | renewal | has_assets | low_demand | dormant
+      const [settlementFilter, setSettlementFilter] = useState('all');
+
+      // 点击代理卡片进入“全景档案视图”的状态
+      const [activeAgentId, setActiveAgentId] = useState(null);
+      const [panoramaTab, setPanoramaTab] = useState('all'); // all | files | packages | cards
+
+      // 4. 各类模态框状态
+      const [previewFile, setPreviewFile] = useState(null); 
+      const [isUploadModalOpen, setIsUploadModalOpen] = useState(false); 
+      const [uploadTab, setUploadTab] = useState('file'); 
+      const [uploadTargetAgent, setUploadTargetAgent] = useState('SCT0259');
+      const [uploadCategory, setUploadCategory] = useState('合同文件');
+      const [pasteText, setPasteText] = useState('');
+      const [importTargetAgent, setImportTargetAgent] = useState('AUTO');
+
+      const [isAddPkgModalOpen, setIsAddPkgModalOpen] = useState(false);
+      const [editingPkgIndex, setEditingPkgIndex] = useState(null);
+      const [pkgForm, setPkgForm] = useState({
+        agentId: 'SCT0259',
+        id: '',
+        name: '',
+        region: '',
+        days: '',
+        data: '',
+        price: '',
+        cardType: 'eSIM',
+        remark: ''
+      });
+
+      const [isAddCardLogModalOpen, setIsAddCardLogModalOpen] = useState(false);
+      const [cardLogForm, setCardLogForm] = useState({
+        agentId: 'SCT0259',
+        date: new Date().toISOString().slice(0, 10),
+        type: 'eSIM出卡',
+        quantity: '',
+        pkgName: '',
+        note: ''
+      });
+
+      const [isEditAgentModalOpen, setIsEditAgentModalOpen] = useState(false);
+      const [editingAgentData, setEditingAgentData] = useState(null);
+      const [isExportWebModalOpen, setIsExportWebModalOpen] = useState(false);
+
+      const [toast, setToast] = useState(null);
+      const searchInputRef = useRef(null);
+      const fileUploadInputRef = useRef(null);
+      const jsonRestoreInputRef = useRef(null);
+
+      // 快捷键 `/` 或 `Ctrl+K` 聚焦搜索
+      useEffect(() => {
+        const handleKeyDown = (e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+            e.preventDefault();
+            searchInputRef.current?.focus();
+          } else if (
+            e.key === '/' &&
+            document.activeElement?.tagName !== 'INPUT' &&
+            document.activeElement?.tagName !== 'TEXTAREA'
+          ) {
+            e.preventDefault();
+            searchInputRef.current?.focus();
+          } else if (e.key === 'Escape' && previewFile) {
+            setPreviewFile(null);
+          }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+      }, [previewFile]);
+
+      const showToast = (msg) => {
+        setToast(msg);
+        setTimeout(() => setToast(null), 3000);
+      };
+
+      const copyToClipboard = (text, label = '内容') => {
+        if (!text) return;
+        navigator.clipboard.writeText(text);
+        showToast(`已复制 ${label}：${text}`);
+      };
+
+      // ==========================================
+      // 全局统计与搜索过滤逻辑
+      // ==========================================
+      const stats = useMemo(() => {
+        const total = agents.length;
+        const active = agents.filter((a) => a.status === 'active').length;
+        const lowDemand = agents.filter((a) => a.status === 'low_demand').length;
+        const dormant = agents.filter((a) => a.status === 'dormant').length;
+        const renewal = agents.filter((a) => a.needsContractRenewal).length;
+        const totalPackages = agents.reduce((acc, a) => acc + (a.packages?.length || 0), 0);
+        const totalCards = agents.reduce((acc, a) => acc + (Number(a.totalCardsIssued) || 0), 0);
+        const hasAssets = agents.filter(
+          (a) =>
+            (a.packages?.length || 0) > 0 ||
+            (a.cardLogs?.length || 0) > 0 ||
+            files.some((f) => f.agentId === a.id)
+        ).length;
+        return { total, active, lowDemand, dormant, renewal, totalPackages, totalCards, totalFiles: files.length, hasAssets };
+      }, [agents, files]);
+
+      const searchMatchedFiles = useMemo(() => {
+        const q = searchQuery.trim().toLowerCase();
+        if (!q) return [];
+        return files.filter((f) => {
+          const agent = agents.find((a) => a.id === f.agentId);
+          return (
+            f.name.toLowerCase().includes(q) ||
+            f.category.toLowerCase().includes(q) ||
+            f.agentId.toLowerCase().includes(q) ||
+            (agent && agent.name.toLowerCase().includes(q)) ||
+            (f.textContent && f.textContent.toLowerCase().includes(q))
+          );
+        });
+      }, [files, agents, searchQuery]);
+
+      const searchMatchedPackages = useMemo(() => {
+        const q = searchQuery.trim().toLowerCase();
+        if (!q) return [];
+        const results = [];
+        agents.forEach((agent) => {
+          (agent.packages || []).forEach((pkg) => {
+            if (
+              (pkg.id && pkg.id.toLowerCase().includes(q)) ||
+              (pkg.name && pkg.name.toLowerCase().includes(q)) ||
+              (pkg.region && pkg.region.toLowerCase().includes(q)) ||
+              (pkg.remark && pkg.remark.toLowerCase().includes(q)) ||
+              agent.id.toLowerCase().includes(q) ||
+              agent.name.toLowerCase().includes(q)
+            ) {
+              results.push({ ...pkg, agentId: agent.id, agentName: agent.name });
+            }
+          });
+        });
+        return results;
+      }, [agents, searchQuery]);
+
+      const filteredAgents = useMemo(() => {
+        const q = searchQuery.trim().toLowerCase();
+        return agents.filter((agent) => {
+          if (statusFilter === 'active' && agent.status !== 'active') return false;
+          if (statusFilter === 'low_demand' && agent.status !== 'low_demand') return false;
+          if (statusFilter === 'dormant' && agent.status !== 'dormant') return false;
+          if (statusFilter === 'renewal' && !agent.needsContractRenewal) return false;
+          if (statusFilter === 'has_assets') {
+            const hasAsset =
+              (agent.packages?.length || 0) > 0 ||
+              (agent.cardLogs?.length || 0) > 0 ||
+              files.some((f) => f.agentId === agent.id);
+            if (!hasAsset) return false;
+          }
+          if (settlementFilter !== 'all' && agent.settlement !== settlementFilter) return false;
+          if (!q) return true;
+
+          const matchBasic =
+            agent.id.toLowerCase().includes(q) ||
+            agent.name.toLowerCase().includes(q) ||
+            (agent.contact && agent.contact.toLowerCase().includes(q)) ||
+            (agent.address && agent.address.toLowerCase().includes(q)) ||
+            (agent.operationsNote && agent.operationsNote.toLowerCase().includes(q)) ||
+            (agent.keyAlert && agent.keyAlert.toLowerCase().includes(q)) ||
+            (agent.cardFee && agent.cardFee.toLowerCase().includes(q)) ||
+            (agent.settlement && agent.settlement.toLowerCase().includes(q)) ||
+            (agent.tags && agent.tags.some((t) => t.toLowerCase().includes(q)));
+
+          const matchPkg = (agent.packages || []).some(
+            (p) =>
+              (p.id && p.id.toLowerCase().includes(q)) ||
+              (p.name && p.name.toLowerCase().includes(q)) ||
+              (p.region && p.region.toLowerCase().includes(q)) ||
+              (p.remark && p.remark.toLowerCase().includes(q))
+          );
+
+          const matchFile = files
+            .filter((f) => f.agentId === agent.id)
+            .some(
+              (f) =>
+                f.name.toLowerCase().includes(q) ||
+                f.category.toLowerCase().includes(q) ||
+                (f.textContent && f.textContent.toLowerCase().includes(q))
+            );
+
+          return matchBasic || matchPkg || matchFile;
+        });
+      }, [agents, files, searchQuery, statusFilter, settlementFilter]);
+
+      const activeAgent = useMemo(() => {
+        if (!activeAgentId) return null;
+        return agents.find((a) => a.id === activeAgentId) || null;
+      }, [agents, activeAgentId]);
+
+      const activeAgentFiles = useMemo(() => {
+        if (!activeAgent) return [];
+        return files.filter((f) => f.agentId === activeAgent.id || f.agentId === 'ALL');
+      }, [files, activeAgent]);
+
+      // ==========================================
+      // 文件上传、在线阅览与下载
+      // ==========================================
+      const handleUploadFiles = async (e) => {
+        const selectedFiles = Array.from(e.target.files || []);
+        if (selectedFiles.length === 0) return;
+        const newFileRecords = [];
+        for (const file of selectedFiles) {
+          const isTextOrCsv = file.type.includes('text') || file.name.endsWith('.csv') || file.name.endsWith('.tsv') || file.name.endsWith('.txt') || file.name.endsWith('.json') || file.name.endsWith('.md');
+          const dataUrl = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (evt) => resolve(evt.target?.result || '');
+            reader.readAsDataURL(file);
+          });
+          let textContent = null;
+          if (isTextOrCsv) {
+            textContent = await new Promise((resolve) => {
+              const reader = new FileReader();
+              reader.onload = (evt) => resolve(evt.target?.result || '');
+              reader.readAsText(file, 'utf-8');
+            });
+          }
+          const sizeKB = (file.size / 1024).toFixed(1);
+          const sizeStr = file.size > 1024 * 1024 ? `${(file.size / (1024 * 1024)).toFixed(2)} MB` : `${sizeKB} KB`;
+          const record = {
+            id: `FILE-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            agentId: uploadTargetAgent,
+            name: file.name,
+            category: uploadCategory,
+            size: sizeStr,
+            uploadDate: new Date().toISOString().slice(0, 10),
+            mimeType: file.type || 'application/octet-stream',
+            dataUrl,
+            textContent
+          };
+          await saveFileToDB(record);
+          newFileRecords.push(record);
+        }
+        setFiles((prev) => [...newFileRecords, ...prev]);
+        e.target.value = '';
+        setIsUploadModalOpen(false);
+        showToast(`已成功上传 ${newFileRecords.length} 个文件至 ${uploadTargetAgent}，可随时搜索、在线阅览或下载！`);
+      };
+
+      const handleDownloadFile = (fileObj) => {
+        if (fileObj.dataUrl) {
+          const a = document.createElement('a');
+          a.href = fileObj.dataUrl;
+          a.download = fileObj.name;
+          a.click();
+          showToast(`正在下载文件：${fileObj.name}`);
+        } else if (fileObj.textContent) {
+          const blob = new Blob(['\uFEFF' + fileObj.textContent], { type: `${fileObj.mimeType || 'text/plain'};charset=utf-8;` });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = fileObj.name;
+          a.click();
+          URL.revokeObjectURL(url);
+          showToast(`正在下载文件：${fileObj.name}`);
+        }
+      };
+
+      const handleDeleteFile = async (fileId) => {
+        await deleteFileFromDB(fileId);
+        setFiles((prev) => prev.filter((f) => f.id !== fileId));
+        if (previewFile?.id === fileId) setPreviewFile(null);
+        showToast('已删除该文件');
+      };
+
+      // ==========================================
+      // 套餐批量粘贴解析与导入
+      // ==========================================
+      const parsedPreviewPackages = useMemo(() => {
+        if (!pasteText.trim()) return [];
+        const lines = pasteText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+        const results = [];
+        lines.forEach((line, idx) => {
+          const cols = line.includes('\t') ? line.split('\t').map((c) => c.trim()) : line.split(',').map((c) => c.trim());
+          const firstColUpper = (cols[0] || '').toUpperCase();
+          if (idx === 0 && (firstColUpper.includes('代理号') || firstColUpper.includes('套餐') || firstColUpper === 'SCT_ID' || firstColUpper === 'ID')) return;
+          if (importTargetAgent === 'AUTO') {
+            let rawAgentId = (cols[0] || '').toUpperCase().replace(/\s+/g, '');
+            if (/^\d{4}$/.test(rawAgentId)) rawAgentId = 'SCT' + rawAgentId;
+            results.push({
+              targetAgentId: rawAgentId || '未指定',
+              id: cols[1] || `PKG-${Date.now().toString().slice(-4)}-${idx + 1}`,
+              name: cols[2] || cols[1] || '未命名套餐',
+              region: cols[3] || '-',
+              days: cols[4] || '-',
+              data: cols[5] || '-',
+              price: cols[6] || '-',
+              cardType: cols[7] || 'eSIM/SIM',
+              remark: cols[8] || ''
+            });
+          } else {
+            const maybeSct = (cols[0] || '').toUpperCase();
+            const hasAgentCol = maybeSct.startsWith('SCT');
+            const offset = hasAgentCol ? 1 : 0;
+            results.push({
+              targetAgentId: importTargetAgent,
+              id: cols[offset] || `PKG-${Date.now().toString().slice(-4)}-${idx + 1}`,
+              name: cols[offset + 1] || cols[offset] || '未命名套餐',
+              region: cols[offset + 2] || '-',
+              days: cols[offset + 3] || '-',
+              data: cols[offset + 4] || '-',
+              price: cols[offset + 5] || '-',
+              cardType: cols[offset + 6] || 'eSIM/SIM',
+              remark: cols[offset + 7] || ''
+            });
+          }
+        });
+        return results;
+      }, [pasteText, importTargetAgent]);
+
+      const handleConfirmBatchImport = () => {
+        if (parsedPreviewPackages.length === 0) return;
+        let importedCount = 0;
+        const updatedAgents = agents.map((agent) => {
+          const matchedPkgs = parsedPreviewPackages.filter((p) => p.targetAgentId.toUpperCase() === agent.id.toUpperCase());
+          if (matchedPkgs.length > 0) {
+            importedCount += matchedPkgs.length;
+            const cleanPkgs = matchedPkgs.map(({ targetAgentId, ...rest }) => rest);
+            return { ...agent, packages: [...(agent.packages || []), ...cleanPkgs] };
+          }
+          return agent;
+        });
+        if (importedCount === 0) {
+          showToast('未匹配到有效代理号，请在上方下拉框指定要导入的代理商');
+          return;
+        }
+        setAgents(updatedAgents);
+        setPasteText('');
+        setIsUploadModalOpen(false);
+        showToast(`成功导入 ${importedCount} 条代理套餐！`);
+      };
+
+      // ==========================================
+      // 单条保存/更新
+      // ==========================================
+      const handleSaveSinglePackage = (e) => {
+        e.preventDefault();
+        if (!pkgForm.name.trim()) return;
+        const pkgItem = {
+          id: pkgForm.id.trim() || `PKG-${Date.now().toString().slice(-5)}`,
+          name: pkgForm.name.trim(),
+          region: pkgForm.region.trim() || '-',
+          days: pkgForm.days.trim() || '-',
+          data: pkgForm.data.trim() || '-',
+          price: pkgForm.price.trim() || '-',
+          cardType: pkgForm.cardType.trim() || 'eSIM',
+          remark: pkgForm.remark.trim()
+        };
+        setAgents((prev) =>
+          prev.map((a) => {
+            if (a.id !== pkgForm.agentId) return a;
+            if (editingPkgIndex !== null) {
+              const next = [...(a.packages || [])];
+              next[editingPkgIndex] = pkgItem;
+              return { ...a, packages: next };
+            }
+            return { ...a, packages: [...(a.packages || []), pkgItem] };
+          })
+        );
+        setIsAddPkgModalOpen(false);
+        setEditingPkgIndex(null);
+        showToast('已保存套餐信息');
+      };
+
+      const handleDeletePackage = (agentId, idx) => {
+        setAgents((prev) => prev.map((a) => a.id === agentId ? { ...a, packages: (a.packages || []).filter((_, i) => i !== idx) } : a));
+        showToast('已删除套餐');
+      };
+
+      const handleSaveCardLog = (e) => {
+        e.preventDefault();
+        const qty = Number(cardLogForm.quantity) || 0;
+        const newLog = {
+          id: `LOG-${Date.now()}`,
+          date: cardLogForm.date || new Date().toISOString().slice(0, 10),
+          type: cardLogForm.type || '出卡记录',
+          quantity: qty,
+          pkgName: cardLogForm.pkgName || '-',
+          note: cardLogForm.note || ''
+        };
+        setAgents((prev) =>
+          prev.map((a) => {
+            if (a.id !== cardLogForm.agentId) return a;
+            const nextTotal = (Number(a.totalCardsIssued) || 0) + qty;
+            return {
+              ...a,
+              totalCardsIssued: nextTotal,
+              cardVolumeSummary: nextTotal > 0 ? `累计已出 ${nextTotal} 张` : a.cardVolumeSummary,
+              cardLogs: [newLog, ...(a.cardLogs || [])]
+            };
+          })
+        );
+        setIsAddCardLogModalOpen(false);
+        showToast(`已登记 ${cardLogForm.agentId} 出卡/流水记录`);
+      };
+
+      const handleDeleteCardLog = (agentId, logId, qty) => {
+        setAgents((prev) =>
+          prev.map((a) => {
+            if (a.id !== agentId) return a;
+            const nextTotal = Math.max(0, (Number(a.totalCardsIssued) || 0) - (Number(qty) || 0));
+            return { ...a, totalCardsIssued: nextTotal, cardLogs: (a.cardLogs || []).filter((l) => l.id !== logId) };
+          })
+        );
+        showToast('已删除该条出卡流水');
+      };
+
+      const handleSaveAgentEdit = (e) => {
+        e.preventDefault();
+        if (!editingAgentData) return;
+        setAgents((prev) => prev.map((a) => (a.id === editingAgentData.id ? { ...editingAgentData } : a)));
+        setIsEditAgentModalOpen(false);
+        showToast(`已更新 ${editingAgentData.id} 代理档案`);
+      };
+
+      // 备份与恢复 JSON
+      const handleExportJSON = () => {
+        const dataStr = JSON.stringify({ agents, files }, null, 2);
+        const blob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `SCT_代理商全景工作台全量备份_${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('已导出全量数据备份 (.json)');
+      };
+
+      const handleImportJSON = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+          try {
+            const parsed = JSON.parse(evt.target?.result || '{}');
+            if (Array.isArray(parsed.agents)) {
+              setAgents(parsed.agents);
+            }
+            if (Array.isArray(parsed.files)) {
+              setFiles(parsed.files);
+              for (const f of parsed.files) {
+                await saveFileToDB(f);
+              }
+            }
+            showToast('已成功恢复全量代理商与文件数据！');
+          } catch (err) {
+            showToast('备份文件格式有误，无法解析');
+          }
+        };
+        reader.readAsText(file, 'utf-8');
+        e.target.value = '';
+      };
+
+      const renderStatusPill = (status) => {
+        if (status === 'active') {
+          return (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+              <span className="w-2 h-2 rounded-full bg-emerald-600"></span>主力活跃
+            </span>
+          );
+        }
+        if (status === 'low_demand') {
+          return (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-200/80 text-slate-700 border border-slate-300">
+              <span className="w-2 h-2 rounded-full bg-slate-500"></span>很少需求(标灰)
+            </span>
+          );
+        }
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+            <Clock className="w-3 h-3" />一年+无动静
+          </span>
+        );
+      };
+
+      return (
+        <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col font-sans">
+          {toast && (
+            <div className="fixed bottom-5 right-5 z-50 flex items-center gap-2.5 px-4 py-3 rounded-xl shadow-xl bg-slate-900 text-white border border-slate-700">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="text-sm font-semibold">{toast}</span>
+            </div>
+          )}
+
+          <header className="bg-slate-900 text-white sticky top-0 z-30 shadow-md">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div onClick={() => setActiveAgentId(null)} className="flex items-center gap-3 cursor-pointer group">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-500 group-hover:bg-indigo-400 flex items-center justify-center text-white font-black text-base shadow-xs transition">SCT</div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h1 className="text-base sm:text-lg font-extrabold tracking-tight text-white">SCT 代理商全景工作台</h1>
+                      <span className="hidden sm:inline-block text-[11px] px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 border border-indigo-400/30 font-semibold">点击代理即看全景</span>
+                    </div>
+                    <p className="text-xs text-slate-400">19 家代理商 · {stats.totalPackages} 个套餐 · {stats.totalFiles} 份合同/文件 · 累计已登记 {stats.totalCards} 张出卡</p>
+                  </div>
+                </div>
+
+                <div className="relative flex-1 min-w-[270px] max-w-xl">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input ref={searchInputRef} type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="搜索代理号(0175/259)、客户名、套餐(帕劳/330259005)、或已上传的合同文件名..." className="w-full pl-10 pr-16 py-2.5 bg-slate-800/90 focus:bg-slate-800 rounded-xl border border-slate-700 focus:border-indigo-400 focus:outline-none text-sm text-white placeholder:text-slate-400 transition" />
+                  {searchQuery ? (
+                    <button onClick={() => setSearchQuery('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-300 hover:text-white bg-slate-700 px-2 py-0.5 rounded-md">清除</button>
+                  ) : (
+                    <span className="hidden sm:inline-block absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-mono text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">/ 键搜索</span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button onClick={() => { setUploadTargetAgent(activeAgentId || 'SCT0259'); setImportTargetAgent(activeAgentId || 'AUTO'); setUploadTab('file'); setIsUploadModalOpen(true); }} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white text-xs sm:text-sm font-bold shadow-xs transition cursor-pointer">
+                    <Upload className="w-4 h-4" /> 上传合同/导入套餐
+                  </button>
+                  <button onClick={handleExportJSON} className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition cursor-pointer" title="导出JSON全量备份">
+                    <Download className="w-3.5 h-3.5" /> 备份数据
+                  </button>
+                  <input ref={jsonRestoreInputRef} type="file" accept=".json" onChange={handleImportJSON} className="hidden" />
+                  <button onClick={() => jsonRestoreInputRef.current?.click()} className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold transition cursor-pointer" title="从JSON备份文件恢复数据">
+                    恢复数据
+                  </button>
+                </div>
+              </div>
+            </div>
+          </header>
+
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6">
+            {searchQuery.trim() !== '' && (searchMatchedFiles.length > 0 || searchMatchedPackages.length > 0) && (
+              <div className="mb-6 bg-white rounded-2xl border-2 border-indigo-500/80 shadow-md p-4 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-indigo-600" />
+                    <span className="text-sm font-extrabold text-slate-900">关键词 “{searchQuery}” 直接匹配到的文件与套餐</span>
+                  </div>
+                  <span className="text-xs text-slate-500">匹配到 {searchMatchedFiles.length} 份文件 · {searchMatchedPackages.length} 个套餐</span>
+                </div>
+                {searchMatchedFiles.length > 0 && (
+                  <div>
+                    <div className="text-xs font-bold text-slate-500 mb-2">📄 匹配到的合同 / 报价文件（点击直接在线阅览或下载）：</div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                      {searchMatchedFiles.map((f) => (
+                        <div key={f.id} className="p-3 rounded-xl bg-indigo-50/50 border border-indigo-200 flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="px-2 py-0.5 rounded bg-indigo-600 text-white font-mono text-[11px] font-bold">{f.agentId}</span>
+                              <span className="text-xs font-bold text-slate-900 truncate">{f.name}</span>
+                            </div>
+                            <div className="text-[11px] text-slate-500 mt-1">分类：{f.category} · 大小：{f.size} · 日期：{f.uploadDate}</div>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button onClick={() => setPreviewFile(f)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold cursor-pointer"><Eye className="w-3.5 h-3.5" /> 在线阅览</button>
+                            <button onClick={() => handleDownloadFile(f)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-xs font-bold cursor-pointer"><Download className="w-3.5 h-3.5" /> 下载</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {searchMatchedPackages.length > 0 && (
+                  <div>
+                    <div className="text-xs font-bold text-slate-500 mb-2">📦 匹配到的代理套餐（点击可进入对应代理全景页）：</div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                      {searchMatchedPackages.map((p, idx) => (
+                        <div key={idx} onClick={() => setActiveAgentId(p.agentId)} className="p-3 rounded-xl bg-emerald-50/50 hover:bg-emerald-50 border border-emerald-200 flex items-center justify-between gap-3 cursor-pointer transition">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="px-2 py-0.5 rounded bg-slate-900 text-white font-mono text-[11px] font-bold">{p.agentId} {p.agentName}</span>
+                              <span className="font-mono text-xs font-bold text-indigo-700">ID: {p.id}</span>
+                              <span className="text-xs font-bold text-slate-900">{p.name}</span>
+                            </div>
+                            <div className="text-[11px] text-slate-600 mt-1">地区：{p.region} · 规格：{p.days} / {p.data} · 价格：<strong className="text-emerald-700">{p.price}</strong> · {p.remark}</div>
+                          </div>
+                          <span className="text-xs font-bold text-indigo-600 shrink-0">打开代理 →</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!activeAgent ? (
+              <div>
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button onClick={() => setStatusFilter('all')} className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-extrabold transition cursor-pointer ${statusFilter === 'all' ? 'bg-slate-900 text-white shadow-sm' : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/90'}`}>全部代理 ({stats.total})</button>
+                    <button onClick={() => setStatusFilter('active')} className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-extrabold transition cursor-pointer ${statusFilter === 'active' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>🔥 主力活跃 ({stats.active})</button>
+                    <button onClick={() => setStatusFilter('renewal')} className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-extrabold transition cursor-pointer ${statusFilter === 'renewal' ? 'bg-amber-500 text-white shadow-sm' : 'bg-white hover:bg-amber-50 text-amber-800 border border-amber-300'}`}>⚠️ 合同待更新 ({stats.renewal})</button>
+                    <button onClick={() => setStatusFilter('has_assets')} className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition cursor-pointer ${statusFilter === 'has_assets' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200'}`}>📁 含套餐/出卡/文件 ({stats.hasAssets})</button>
+                    <button onClick={() => setStatusFilter('low_demand')} className={`px-3 py-2 rounded-xl text-xs font-semibold transition cursor-pointer ${statusFilter === 'low_demand' ? 'bg-slate-700 text-white' : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200'}`}>很少需求·标灰 ({stats.lowDemand})</button>
+                    <button onClick={() => setStatusFilter('dormant')} className={`px-3 py-2 rounded-xl text-xs font-semibold transition cursor-pointer ${statusFilter === 'dormant' ? 'bg-slate-700 text-white' : 'bg-white hover:bg-slate-100 text-slate-500 border border-slate-200'}`}>一年+无动静 ({stats.dormant})</button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <select value={settlementFilter} onChange={(e) => setSettlementFilter(e.target.value)} className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white text-slate-800 border border-slate-200 shadow-2xs focus:outline-none">
+                      <option value="all">全部结算方式 (19)</option>
+                      <option value="套餐结算">套餐结算 (8家)</option>
+                      <option value="流量结算">流量结算 (11家)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {filteredAgents.length === 0 ? (
+                  <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center">
+                    <p className="text-base font-bold text-slate-700">没有找到匹配的代理商</p>
+                    <button onClick={() => { setSearchQuery(''); setStatusFilter('all'); setSettlementFilter('all'); }} className="mt-3 px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold">重置筛选条件</button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {filteredAgents.map((agent) => {
+                      const agentFileCount = files.filter((f) => f.agentId === agent.id).length;
+                      const pkgCount = agent.packages?.length || 0;
+                      const logCount = agent.cardLogs?.length || 0;
+                      const isActive = agent.status === 'active';
+                      return (
+                        <div key={agent.id} onClick={() => { setActiveAgentId(agent.id); setPanoramaTab('all'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className={`group rounded-2xl border-2 p-5 transition-all cursor-pointer flex flex-col justify-between ${isActive ? 'bg-white border-slate-200/90 hover:border-indigo-600 shadow-xs hover:shadow-lg' : 'bg-white/80 border-slate-200/70 hover:border-slate-400 shadow-2xs hover:shadow-md'}`}>
+                          <div>
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className={`px-2.5 py-1 rounded-lg font-mono text-xs font-black shrink-0 ${isActive ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-white'}`}>{agent.id}</span>
+                                <h2 className="text-base font-extrabold text-slate-900 truncate group-hover:text-indigo-600 transition">{agent.name}</h2>
+                              </div>
+                              <div className="shrink-0">{renderStatusPill(agent.status)}</div>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2 my-4 p-3 rounded-xl bg-slate-50 border border-slate-200/80 text-center">
+                              <div><div className="text-[11px] font-semibold text-slate-400">结算方式</div><div className={`text-xs font-extrabold mt-0.5 ${agent.settlement === '套餐结算' ? 'text-blue-700' : 'text-purple-700'}`}>{agent.settlement}</div></div>
+                              <div className="border-x border-slate-200/80 px-1"><div className="text-[11px] font-semibold text-slate-400">卡费标准</div><div className="text-xs font-extrabold text-emerald-700 mt-0.5 truncate">{agent.cardFee === '*' ? '待定 (*)' : agent.cardFee}</div></div>
+                              <div><div className="text-[11px] font-semibold text-slate-400">累计出卡</div><div className="text-xs font-extrabold text-slate-900 mt-0.5">{agent.totalCardsIssued > 0 ? `${agent.totalCardsIssued} 张` : '少量/待登记'}</div></div>
+                            </div>
+                            <div className={`px-3.5 py-2.5 rounded-xl text-xs font-bold leading-snug flex items-center gap-2 ${agent.id === 'SCT0398' || agent.id === 'SCT0272' || agent.id === 'SCT0393' ? 'bg-rose-50 text-rose-900 border border-rose-200' : agent.needsContractRenewal ? 'bg-amber-50 text-amber-900 border border-amber-200' : 'bg-indigo-50/70 text-indigo-950 border border-indigo-100'}`}>
+                              <span className="truncate">{agent.keyAlert}</span>
+                            </div>
+                          </div>
+                          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-2.5 text-slate-600 font-semibold">
+                              <span className={pkgCount > 0 ? 'text-indigo-700 font-bold' : 'text-slate-400'}>📦 套餐({pkgCount})</span>
+                              <span className={logCount > 0 ? 'text-emerald-700 font-bold' : 'text-slate-400'}>📊 出卡({logCount})</span>
+                              <span className={agentFileCount > 0 ? 'text-amber-700 font-bold' : 'text-slate-400'}>📄 文件({agentFileCount})</span>
+                            </div>
+                            <span className="inline-flex items-center gap-0.5 font-extrabold text-indigo-600 group-hover:translate-x-0.5 transition">展开全景 <ChevronRight className="w-4 h-4" /></span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-6">
+                <div className="flex flex-wrap items-center justify-between gap-3 bg-white px-4 py-3 rounded-2xl border border-slate-200 shadow-2xs">
+                  <div className="flex items-center gap-3">
+                    <button onClick={() => setActiveAgentId(null)} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs sm:text-sm font-bold transition cursor-pointer"><ArrowLeft className="w-4 h-4" /> 返回全部代理商列表</button>
+                    <span className="text-xs text-slate-500 hidden sm:inline">正在阅览 <strong className="text-slate-900">{activeAgent.id} ({activeAgent.name})</strong> 的全景资料库</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-slate-500">快速切换代理：</span>
+                    <select value={activeAgent.id} onChange={(e) => setActiveAgentId(e.target.value)} className="px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-300 text-xs font-bold text-slate-900 focus:outline-none">
+                      {agents.map((a) => (<option key={a.id} value={a.id}>{a.id} - {a.name}</option>))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6">
+                  <div className="flex flex-wrap items-start justify-between gap-4 pb-5 border-b border-slate-100">
+                    <div>
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <button onClick={() => copyToClipboard(activeAgent.id, '代理号')} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-mono text-base font-black transition cursor-pointer">{activeAgent.id} <Copy className="w-3.5 h-3.5 opacity-80" /></button>
+                        <h2 className="text-2xl font-black text-slate-900">{activeAgent.name}</h2>
+                        {renderStatusPill(activeAgent.status)}
+                        {activeAgent.needsContractRenewal && (<span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-extrabold bg-amber-100 text-amber-900 border border-amber-300"><AlertTriangle className="w-3.5 h-3.5" /> 合同需更新</span>)}
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-slate-600">
+                        <div className="flex items-center gap-1.5"><Phone className="w-3.5 h-3.5 text-indigo-600" /> <span>对接人：</span><strong className="text-slate-900">{activeAgent.contact || '无'}</strong>{activeAgent.contact && activeAgent.contact !== '无' && (<button onClick={() => copyToClipboard(activeAgent.contact, '联系方式')} className="text-indigo-600 hover:underline font-semibold ml-1">[复制]</button>)}</div>
+                        <div className="flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5 text-slate-400" /> <span>地址：{activeAgent.address || '无'}</span></div>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button onClick={() => { setUploadTargetAgent(activeAgent.id); setUploadTab('file'); setIsUploadModalOpen(true); }} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs cursor-pointer"><Upload className="w-3.5 h-3.5" /> 上传合同/资料文件</button>
+                      <button onClick={() => { setEditingAgentData({ ...activeAgent }); setIsEditAgentModalOpen(true); }} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold cursor-pointer"><Edit3 className="w-3.5 h-3.5" /> 修改代理档案</button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 my-5">
+                    <div className="p-4 rounded-2xl bg-indigo-50/60 border border-indigo-100"><div className="text-xs font-bold text-indigo-600">结算方式</div><div className="text-xl font-black text-slate-900 mt-1">{activeAgent.settlement}</div><div className="text-[11px] text-slate-500 mt-1">支持在修改档案中切换</div></div>
+                    <div className="p-4 rounded-2xl bg-emerald-50/60 border border-emerald-100"><div className="text-xs font-bold text-emerald-700">卡费标准</div><div className="text-xl font-black text-emerald-800 mt-1">{activeAgent.cardFee === '*' ? '* (无近期出卡)' : activeAgent.cardFee}</div><div className="text-[11px] text-slate-500 mt-1">发卡计费依据</div></div>
+                    <div className="p-4 rounded-2xl bg-blue-50/60 border border-blue-100 flex flex-col justify-between">
+                      <div><div className="text-xs font-bold text-blue-700 flex items-center justify-between"><span>累计出卡数量</span><button onClick={() => { setCardLogForm({ agentId: activeAgent.id, date: new Date().toISOString().slice(0, 10), type: 'eSIM/实体卡出货', quantity: '', pkgName: '', note: '' }); setIsAddCardLogModalOpen(true); }} className="text-blue-700 hover:underline font-extrabold">+ 登记出卡</button></div><div className="text-xl font-black text-blue-950 mt-1">{activeAgent.totalCardsIssued > 0 ? `${activeAgent.totalCardsIssued} 张` : '0 张'}</div></div>
+                      <div className="text-[11px] text-blue-800/80 mt-1 truncate">{activeAgent.cardVolumeSummary}</div>
+                    </div>
+                    <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200"><div className="text-xs font-bold text-amber-800">合同状态</div><div className="text-base font-black text-amber-950 mt-1">{activeAgent.contractStatus}</div><div className="text-[11px] text-amber-800/80 mt-1">已存 {activeAgentFiles.length} 份关联文件</div></div>
+                  </div>
+
+                  {(activeAgent.credentials || activeAgent.portalUrl) && (
+                    <div className="mb-4 p-4 rounded-2xl bg-indigo-900 text-white flex flex-wrap items-center justify-between gap-3">
+                      {activeAgent.credentials && (
+                        <div className="flex flex-wrap items-center gap-3 text-xs">
+                          <span className="font-bold text-indigo-200 flex items-center gap-1.5"><Key className="w-4 h-4 text-amber-400" /> 代理商后台账号密码：</span>
+                          <button onClick={() => copyToClipboard(activeAgent.credentials.account, '代理商账号')} className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 font-mono font-bold text-amber-300 border border-slate-700 cursor-pointer">账号: {activeAgent.credentials.account} [点击复制]</button>
+                          <button onClick={() => copyToClipboard(activeAgent.credentials.password, '代理商密码')} className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 font-mono font-bold text-amber-300 border border-slate-700 cursor-pointer">密码: {activeAgent.credentials.password} [点击复制]</button>
+                        </div>
+                      )}
+                      {activeAgent.portalUrl && (
+                        <div className="flex items-center gap-2 text-xs"><span className="font-bold text-indigo-200">转售卡系统：</span><a href={activeAgent.portalUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white font-bold">打开 {activeAgent.portalUrl} <ExternalLink className="w-3.5 h-3.5" /></a></div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="p-4 rounded-2xl bg-amber-50/90 border border-amber-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-extrabold text-amber-950 flex items-center gap-1.5"><ShieldAlert className="w-4 h-4 text-amber-600" /> 运营交接情况与操作注意事项</span>
+                      <button onClick={() => copyToClipboard(activeAgent.operationsNote, '运营交接情况')} className="text-xs font-bold text-amber-800 hover:underline">复制全文</button>
+                    </div>
+                    <p className="text-sm text-slate-900 whitespace-pre-line leading-relaxed bg-white p-3.5 rounded-xl border border-amber-200/70">{activeAgent.operationsNote}</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 pb-3">
+                  {[
+                    { key: 'all', label: '🌟 全部全景展示 (合同+套餐+出卡)' },
+                    { key: 'files', label: `📄 合同与资料文件 (${activeAgentFiles.length})` },
+                    { key: 'packages', label: `📦 专属套餐库 (${activeAgent.packages?.length || 0})` },
+                    { key: 'cards', label: `📊 出卡数量与流水 (${activeAgent.cardLogs?.length || 0})` }
+                  ].map((t) => (
+                    <button key={t.key} onClick={() => setPanoramaTab(t.key)} className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-extrabold transition cursor-pointer ${panoramaTab === t.key ? 'bg-indigo-600 text-white shadow-xs' : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200'}`}>{t.label}</button>
+                  ))}
+                </div>
+
+                {(panoramaTab === 'all' || panoramaTab === 'files') && (
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+                    <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                      <div><h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2"><FolderOpen className="w-5 h-5 text-indigo-600" /> 合同文件与资料库 ({activeAgentFiles.length} 份)</h3><p className="text-xs text-slate-500 mt-0.5">支持上传 PDF合同、图片、CSV报价单或文本资料，点击【在线阅览】即可在网页内直接查看，或【下载】到本地</p></div>
+                      <button onClick={() => { setUploadTargetAgent(activeAgent.id); setUploadTab('file'); setIsUploadModalOpen(true); }} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs cursor-pointer"><Upload className="w-4 h-4" /> + 上传合同 / 附件到此代理</button>
+                    </div>
+                    <div className="p-6">
+                      {activeAgentFiles.length === 0 ? (
+                        <div className="p-8 text-center border-2 border-dashed border-slate-200 rounded-2xl"><p className="text-sm font-bold text-slate-600">暂未上传该代理的专属合同或文件</p><button onClick={() => { setUploadTargetAgent(activeAgent.id); setUploadTab('file'); setIsUploadModalOpen(true); }} className="mt-3 px-4 py-2 rounded-xl bg-indigo-50 text-indigo-700 text-xs font-bold hover:bg-indigo-100">立即上传第一份合同或文件</button></div>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                          {activeAgentFiles.map((fileObj) => (
+                            <div key={fileObj.id} className="p-4 rounded-xl border border-slate-200 hover:border-indigo-300 bg-slate-50/70 hover:bg-white transition flex items-center justify-between gap-3">
+                              <div className="flex items-start gap-3 min-w-0">
+                                <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0 font-bold"><FileText className="w-5 h-5" /></div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2"><span className="text-sm font-extrabold text-slate-900 truncate">{fileObj.name}</span></div>
+                                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mt-1"><span className="px-2 py-0.5 rounded bg-white border border-slate-200 font-semibold text-slate-700">{fileObj.category}</span><span>{fileObj.size}</span><span>· {fileObj.uploadDate}</span>{fileObj.agentId === 'ALL' && (<span className="text-indigo-600 font-semibold">(全局交接表)</span>)}</div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <button onClick={() => setPreviewFile(fileObj)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-2xs cursor-pointer"><Eye className="w-3.5 h-3.5" /> 在线阅览</button>
+                                <button onClick={() => handleDownloadFile(fileObj)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-xs font-bold cursor-pointer"><Download className="w-3.5 h-3.5" /> 下载</button>
+                                {!fileObj.id.startsWith('DOC-INIT-') && (<button onClick={() => handleDeleteFile(fileObj.id)} className="p-1.5 text-slate-400 hover:text-rose-600" title="删除文件"><Trash2 className="w-4 h-4" /></button>)}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {(panoramaTab === 'all' || panoramaTab === 'packages') && (
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+                    <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                      <div><h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2"><Package className="w-5 h-5 text-indigo-600" /> {activeAgent.name} 专属套餐表 ({activeAgent.packages?.length || 0} 个)</h3><p className="text-xs text-slate-500 mt-0.5">支持从 Excel 报价表直接复制多行粘贴导入，或手动添加单条套餐</p></div>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => { setImportTargetAgent(activeAgent.id); setUploadTab('package'); setIsUploadModalOpen(true); }} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold cursor-pointer"><ClipboardPaste className="w-4 h-4" /> 从 Excel 粘贴批量套餐</button>
+                        <button onClick={() => { setEditingPkgIndex(null); setPkgForm({ agentId: activeAgent.id, id: '', name: '', region: '', days: '', data: '', price: '', cardType: activeAgent.id === 'SCT0398' ? 'CMI白卡(去FUP)' : 'eSIM', remark: '' }); setIsAddPkgModalOpen(true); }} className="inline-flex items-center gap-1 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold cursor-pointer"><Plus className="w-4 h-4" /> 新增套餐</button>
+                      </div>
+                    </div>
+                    {activeAgent.id === 'SCT0398' && (<div className="px-6 py-2.5 bg-rose-50 border-b border-rose-200 text-xs font-bold text-rose-800 flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-rose-600" /> 特别提醒：发给【香港精靈機器人自動化有限公司 (SCT0398)】的产品表必须去掉 FUP 说明！</div>)}
+                    {(!activeAgent.packages || activeAgent.packages.length === 0) ? (
+                      <div className="p-10 text-center"><p className="text-sm font-bold text-slate-600">暂未录入 {activeAgent.name} 的套餐明细</p><p className="text-xs text-slate-400 mt-1">您可以点击右上方【从 Excel 粘贴批量套餐】一键导入该代理的所有产品报价</p></div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead><tr className="bg-slate-100/80 border-b border-slate-200 text-xs font-extrabold text-slate-600"><th className="py-3 px-4">套餐ID / 编码</th><th className="py-3 px-4">套餐名称</th><th className="py-3 px-3">覆盖地区</th><th className="py-3 px-3">天数</th><th className="py-3 px-3">流量规格</th><th className="py-3 px-3">结算价格</th><th className="py-3 px-3">卡类型</th><th className="py-3 px-4">备注说明</th><th className="py-3 px-4 text-right">操作</th></tr></thead>
+                          <tbody className="divide-y divide-slate-100 text-xs">
+                            {activeAgent.packages.map((pkg, idx) => (
+                              <tr key={idx} className="hover:bg-slate-50">
+                                <td className="py-3.5 px-4 font-mono font-bold text-indigo-700"><button onClick={() => copyToClipboard(pkg.id, '套餐ID')} className="hover:underline inline-flex items-center gap-1">{pkg.id} <Copy className="w-3 h-3 opacity-60" /></button></td>
+                                <td className="py-3.5 px-4 font-bold text-slate-900">{pkg.name}</td><td className="py-3.5 px-3 text-slate-700">{pkg.region}</td><td className="py-3.5 px-3 text-slate-700">{pkg.days}</td>
+                                <td className="py-3.5 px-3 font-semibold text-slate-900">{pkg.data}</td><td className="py-3.5 px-3 font-extrabold text-emerald-700">{pkg.price}</td><td className="py-3.5 px-3"><span className="px-2 py-0.5 rounded bg-slate-100 text-slate-800 font-semibold">{pkg.cardType}</span></td>
+                                <td className="py-3.5 px-4 text-slate-500">{pkg.remark}</td>
+                                <td className="py-3.5 px-4 text-right whitespace-nowrap"><button onClick={() => { setEditingPkgIndex(idx); setPkgForm({ agentId: activeAgent.id, ...pkg }); setIsAddPkgModalOpen(true); }} className="text-slate-500 hover:text-indigo-600 p-1"><Edit3 className="w-4 h-4" /></button><button onClick={() => handleDeletePackage(activeAgent.id, idx)} className="text-slate-400 hover:text-rose-600 p-1 ml-1"><Trash2 className="w-4 h-4" /></button></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {(panoramaTab === 'all' || panoramaTab === 'cards') && (
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+                    <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                      <div><h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2"><BarChart3 className="w-5 h-5 text-emerald-600" /> 出卡数量统计与发卡/划转流水 (累计：{activeAgent.totalCardsIssued || 0} 张)</h3><p className="text-xs text-slate-500 mt-0.5">记录每次空白卡出货、eSIM批量发卡、帕劳卡代发充值或转售卡系统余额划转情况</p></div>
+                      <button onClick={() => { setCardLogForm({ agentId: activeAgent.id, date: new Date().toISOString().slice(0, 10), type: 'eSIM/实体卡出货', quantity: '', pkgName: '', note: '' }); setIsAddCardLogModalOpen(true); }} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs cursor-pointer"><Plus className="w-4 h-4" /> + 登记出卡数量 / 充值记录</button>
+                    </div>
+                    <div className="p-6">
+                      {(!activeAgent.cardLogs || activeAgent.cardLogs.length === 0) ? (
+                        <div className="p-8 text-center border-2 border-dashed border-slate-200 rounded-2xl"><p className="text-sm font-bold text-slate-600">暂无该代理的出卡批次记录</p><p className="text-xs text-slate-400 mt-1">近况说明：{activeAgent.cardVolumeSummary}</p></div>
+                      ) : (
+                        <div className="space-y-3">
+                          {activeAgent.cardLogs.map((log) => (
+                            <div key={log.id} className="p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                              <div className="flex flex-wrap items-center gap-3"><span className="font-mono text-xs font-extrabold px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-800">{log.date}</span><span className="px-2.5 py-1 rounded-lg bg-indigo-100 text-indigo-800 text-xs font-bold">{log.type}</span>{log.quantity > 0 && (<span className="px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 text-xs font-extrabold">出卡数量：{log.quantity} 张</span>)}<span className="text-sm font-bold text-slate-900">{log.pkgName}</span></div>
+                              <div className="flex items-center gap-3"><span className="text-xs text-slate-600">{log.note}</span><button onClick={() => handleDeleteCardLog(activeAgent.id, log.id, log.quantity)} className="text-slate-400 hover:text-rose-600 p-1" title="删除记录"><Trash2 className="w-4 h-4" /></button></div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </main>
+
+          {previewFile && (
+            <div className="fixed inset-0 z-50 bg-slate-900/75 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-5xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+                <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2"><span className="px-2 py-0.5 rounded bg-indigo-500 text-white font-mono text-xs font-bold">{previewFile.agentId}</span><h3 className="text-base font-bold truncate">{previewFile.name}</h3></div>
+                    <p className="text-xs text-slate-400 mt-0.5">分类：{previewFile.category} · 大小：{previewFile.size} · 上传日期：{previewFile.uploadDate}</p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button onClick={() => handleDownloadFile(previewFile)} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-bold cursor-pointer"><Download className="w-4 h-4" /> 下载文件到本地</button>
+                    <button onClick={() => setPreviewFile(null)} className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white cursor-pointer"><X className="w-5 h-5" /></button>
+                  </div>
+                </div>
+                <div className="p-6 overflow-y-auto flex-1 bg-slate-100">
+                  {previewFile.textContent && previewFile.name.toLowerCase().endsWith('.csv') ? (
+                    <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto shadow-xs">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <tbody>
+                          {previewFile.textContent.split(/\r?\n/).filter(Boolean).map((line, rIdx) => {
+                            const cols = line.split(',');
+                            return (
+                              <tr key={rIdx} className={rIdx === 0 ? 'bg-slate-900 text-white font-bold' : 'border-b border-slate-100 hover:bg-slate-50'}>
+                                {cols.map((col, cIdx) => (<td key={cIdx} className="p-3">{col}</td>))}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : previewFile.textContent ? (
+                    <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs"><pre className="text-sm font-sans whitespace-pre-wrap text-slate-800 leading-relaxed">{previewFile.textContent}</pre></div>
+                  ) : previewFile.dataUrl && previewFile.mimeType?.includes('pdf') ? (
+                    <iframe src={previewFile.dataUrl} title={previewFile.name} className="w-full h-[70vh] rounded-xl border border-slate-300 bg-white" />
+                  ) : previewFile.dataUrl && previewFile.mimeType?.includes('image') ? (
+                    <div className="text-center"><img src={previewFile.dataUrl} alt={previewFile.name} className="max-w-full max-h-[70vh] mx-auto rounded-xl shadow-md border border-slate-200" /></div>
+                  ) : (
+                    <div className="bg-white p-12 rounded-xl border border-slate-200 text-center">
+                      <File className="w-12 h-12 text-indigo-600 mx-auto mb-3" />
+                      <h4 className="text-base font-bold text-slate-900">{previewFile.name}</h4>
+                      <p className="text-xs text-slate-500 mt-1">该文件已安全存储在工作台中，请点击下方按钮下载原件查看</p>
+                      <button onClick={() => handleDownloadFile(previewFile)} className="mt-4 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-bold"><Download className="w-4 h-4" /> 立即下载 {previewFile.name}</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {isUploadModalOpen && (
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+                <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <button onClick={() => setUploadTab('file')} className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${uploadTab === 'file' ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-300 hover:text-white'}`}>📄 上传合同 / 资料文件 (支持在线阅览)</button>
+                    <button onClick={() => setUploadTab('package')} className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${uploadTab === 'package' ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-300 hover:text-white'}`}>📦 批量粘贴 / 导入代理套餐</button>
+                  </div>
+                  <button onClick={() => setIsUploadModalOpen(false)} className="text-slate-400 hover:text-white"><X className="w-5 h-5" /></button>
+                </div>
+
+                {uploadTab === 'file' ? (
+                  <div className="p-6 space-y-5 overflow-y-auto">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">1. 选择文件归属的代理商：</label>
+                        <select value={uploadTargetAgent} onChange={(e) => setUploadTargetAgent(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-slate-900 bg-slate-50">
+                          <option value="ALL">ALL - 全局通用交接文件</option>
+                          {agents.map((a) => (<option key={a.id} value={a.id}>{a.id} - {a.name}</option>))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">2. 文件资料分类：</label>
+                        <select value={uploadCategory} onChange={(e) => setUploadCategory(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-slate-900 bg-slate-50">
+                          <option value="合同文件">📄 合同文件 (PDF/扫描件)</option>
+                          <option value="套餐报价表">📊 套餐报价表 (CSV/Excel)</option>
+                          <option value="营业执照/资质">🏢 营业执照 / 公司资质 (如非台执照)</option>
+                          <option value="水单/财务凭证">💳 银行水单 / 押金凭证</option>
+                          <option value="运营操作规范">📌 运营操作规范 / 其他</option>
+                        </select>
+                      </div>
+                    </div>
+                    <input ref={fileUploadInputRef} type="file" multiple onChange={handleUploadFiles} className="hidden" />
+                    <div onClick={() => fileUploadInputRef.current?.click()} className="border-2 border-dashed border-indigo-300 hover:border-indigo-500 bg-indigo-50/40 hover:bg-indigo-50/80 rounded-2xl p-10 text-center cursor-pointer transition">
+                      <Upload className="w-10 h-10 text-indigo-600 mx-auto mb-3" />
+                      <p className="text-sm font-extrabold text-slate-900">点击选择本地文件上传（支持同时多选）</p>
+                      <p className="text-xs text-slate-500 mt-1">支持 PDF 合同、JPG/PNG 图片、CSV/TXT 表格文档等，上传后自动保存在浏览器中，可随时搜索、在线阅览与下载</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-6 space-y-4 overflow-y-auto">
+                    <div className="flex flex-wrap items-center justify-between gap-3 bg-indigo-50 p-3.5 rounded-xl border border-indigo-200">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-indigo-950">导入归属代理：</span>
+                        <select value={importTargetAgent} onChange={(e) => setImportTargetAgent(e.target.value)} className="px-3 py-1.5 rounded-lg bg-white border border-indigo-300 text-xs font-bold text-slate-900">
+                          <option value="AUTO">自动识别第1列中的代理号 (如 SCT0175)</option>
+                          {agents.map((a) => (<option key={a.id} value={a.id}>指定导入到：{a.id} - {a.name}</option>))}
+                        </select>
+                      </div>
+                      <button type="button" onClick={() => { setImportTargetAgent('AUTO'); setPasteText(SAMPLE_PASTE_TEXT); }} className="px-3 py-1.5 rounded-lg bg-white text-indigo-700 border border-indigo-200 text-xs font-bold">填入示例套餐体验</button>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">直接从 Excel 复制套餐行粘贴到下方：</label>
+                      <textarea rows={5} value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder="格式：套餐ID | 套餐名称 | 覆盖地区 | 天数 | 流量 | 价格 | 卡类型 | 备注" className="w-full p-3 rounded-xl border border-slate-300 font-mono text-xs bg-slate-50 focus:bg-white focus:outline-none" />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button onClick={() => setIsUploadModalOpen(false)} className="px-4 py-2 rounded-xl border border-slate-300 text-xs font-bold text-slate-600">取消</button>
+                      <button onClick={handleConfirmBatchImport} disabled={parsedPreviewPackages.length === 0} className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white text-xs font-bold">确认导入 ({parsedPreviewPackages.length} 条套餐)</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {isAddPkgModalOpen && (
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden">
+                <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
+                  <h3 className="text-sm font-bold">{editingPkgIndex !== null ? '编辑套餐' : `新增套餐 (${pkgForm.agentId})`}</h3>
+                  <button onClick={() => setIsAddPkgModalOpen(false)} className="text-slate-400 hover:text-white"><X className="w-5 h-5" /></button>
+                </div>
+                <form onSubmit={handleSaveSinglePackage} className="p-6 space-y-3.5 text-xs">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="block font-bold text-slate-700 mb-1">套餐ID / 编码</label><input type="text" placeholder="如 330259005" value={pkgForm.id} onChange={(e) => setPkgForm({ ...pkgForm, id: e.target.value })} className="w-full px-3 py-2 rounded-xl border border-slate-300" /></div>
+                    <div><label className="block font-bold text-slate-700 mb-1">覆盖地区</label><input type="text" placeholder="如 港澳/帕劳、台湾" value={pkgForm.region} onChange={(e) => setPkgForm({ ...pkgForm, region: e.target.value })} className="w-full px-3 py-2 rounded-xl border border-slate-300" /></div>
+                  </div>
+                  <div><label className="block font-bold text-slate-700 mb-1">套餐名称 *</label><input type="text" required placeholder="如 港澳帕劳12天10GB" value={pkgForm.name} onChange={(e) => setPkgForm({ ...pkgForm, name: e.target.value })} className="w-full px-3 py-2 rounded-xl border border-slate-300" /></div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div><label className="block font-bold text-slate-700 mb-1">天数</label><input type="text" placeholder="12天" value={pkgForm.days} onChange={(e) => setPkgForm({ ...pkgForm, days: e.target.value })} className="w-full px-3 py-2 rounded-xl border border-slate-300" /></div>
+                    <div><label className="block font-bold text-slate-700 mb-1">流量规格</label><input type="text" placeholder="10GB" value={pkgForm.data} onChange={(e) => setPkgForm({ ...pkgForm, data: e.target.value })} className="w-full px-3 py-2 rounded-xl border border-slate-300" /></div>
+                    <div><label className="block font-bold text-slate-700 mb-1">结算价格</label><input type="text" placeholder="25 HKD" value={pkgForm.price} onChange={(e) => setPkgForm({ ...pkgForm, price: e.target.value })} className="w-full px-3 py-2 rounded-xl border border-slate-300" /></div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="block font-bold text-slate-700 mb-1">卡类型</label><input type="text" value={pkgForm.cardType} onChange={(e) => setPkgForm({ ...pkgForm, cardType: e.target.value })} className="w-full px-3 py-2 rounded-xl border border-slate-300" /></div>
+                    <div><label className="block font-bold text-slate-700 mb-1">备注说明</label><input type="text" value={pkgForm.remark} onChange={(e) => setPkgForm({ ...pkgForm, remark: e.target.value })} className="w-full px-3 py-2 rounded-xl border border-slate-300" /></div>
+                  </div>
+                  <div className="pt-3 flex justify-end gap-2">
+                    <button type="button" onClick={() => setIsAddPkgModalOpen(false)} className="px-4 py-2 rounded-xl border border-slate-300 font-bold text-slate-600">取消</button>
+                    <button type="submit" className="px-5 py-2 rounded-xl bg-indigo-600 text-white font-bold">保存套餐</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {isAddCardLogModalOpen && (
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden">
+                <div className="px-6 py-4 bg-emerald-700 text-white flex items-center justify-between">
+                  <h3 className="text-sm font-bold">登记出卡数量 / 充值流水 ({cardLogForm.agentId})</h3>
+                  <button onClick={() => setIsAddCardLogModalOpen(false)} className="text-emerald-200 hover:text-white"><X className="w-5 h-5" /></button>
+                </div>
+                <form onSubmit={handleSaveCardLog} className="p-6 space-y-3.5 text-xs">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="block font-bold text-slate-700 mb-1">日期</label><input type="date" value={cardLogForm.date} onChange={(e) => setCardLogForm({ ...cardLogForm, date: e.target.value })} className="w-full px-3 py-2 rounded-xl border border-slate-300" /></div>
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">业务类型</label>
+                      <select value={cardLogForm.type} onChange={(e) => setCardLogForm({ ...cardLogForm, type: e.target.value })} className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold">
+                        <option value="eSIM出卡">eSIM出卡</option><option value="CMI/PMCI空白卡出货">CMI/PMCI空白卡出货</option><option value="实体成卡代发">实体成卡代发</option><option value="转售系统划转/水单充值">转售系统划转/水单充值</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div><label className="block font-bold text-slate-700 mb-1">本次出卡数量 (张) — 将自动累加到代理总出卡量</label><input type="number" placeholder="如 100（若仅为充值划转可填 0）" value={cardLogForm.quantity} onChange={(e) => setCardLogForm({ ...cardLogForm, quantity: e.target.value })} className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold" /></div>
+                  <div><label className="block font-bold text-slate-700 mb-1">关联套餐或摘要 *</label><input type="text" required placeholder="如 400张CMI空白卡 / 330259005帕劳12天10GB" value={cardLogForm.pkgName} onChange={(e) => setCardLogForm({ ...cardLogForm, pkgName: e.target.value })} className="w-full px-3 py-2 rounded-xl border border-slate-300" /></div>
+                  <div><label className="block font-bold text-slate-700 mb-1">备注说明</label><input type="text" placeholder="如 已收水单 / 香港Hilda代发" value={cardLogForm.note} onChange={(e) => setCardLogForm({ ...cardLogForm, note: e.target.value })} className="w-full px-3 py-2 rounded-xl border border-slate-300" /></div>
+                  <div className="pt-3 flex justify-end gap-2">
+                    <button type="button" onClick={() => setIsAddCardLogModalOpen(false)} className="px-4 py-2 rounded-xl border border-slate-300 font-bold text-slate-600">取消</button>
+                    <button type="submit" className="px-5 py-2 rounded-xl bg-emerald-600 text-white font-bold">确认登记</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {isEditAgentModalOpen && editingAgentData && (
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-xl w-full shadow-2xl border border-slate-200 overflow-hidden">
+                <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
+                  <h3 className="text-sm font-bold">修改代理商档案：{editingAgentData.id} - {editingAgentData.name}</h3>
+                  <button onClick={() => setIsEditAgentModalOpen(false)} className="text-slate-400 hover:text-white"><X className="w-5 h-5" /></button>
+                </div>
+                <form onSubmit={handleSaveAgentEdit} className="p-6 space-y-3.5 text-xs">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">代理状态</label>
+                      <select value={editingAgentData.status} onChange={(e) => setEditingAgentData({ ...editingAgentData, status: e.target.value })} className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold">
+                        <option value="active">主力活跃</option><option value="low_demand">很少需求(标灰)</option><option value="dormant">一年+无动静</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">结算方式</label>
+                      <select value={editingAgentData.settlement} onChange={(e) => setEditingAgentData({ ...editingAgentData, settlement: e.target.value })} className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold">
+                        <option value="套餐结算">套餐结算</option><option value="流量结算">流量结算</option>
+                      </select>
+                    </div>
+                    <div><label className="block font-bold text-slate-700 mb-1">累计出卡总数(张)</label><input type="number" value={editingAgentData.totalCardsIssued || 0} onChange={(e) => setEditingAgentData({ ...editingAgentData, totalCardsIssued: Number(e.target.value) || 0 })} className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold" /></div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="block font-bold text-slate-700 mb-1">卡费标准</label><input type="text" value={editingAgentData.cardFee} onChange={(e) => setEditingAgentData({ ...editingAgentData, cardFee: e.target.value })} className="w-full px-3 py-2 rounded-xl border border-slate-300" /></div>
+                    <div><label className="block font-bold text-slate-700 mb-1">对接人联系方式</label><input type="text" value={editingAgentData.contact} onChange={(e) => setEditingAgentData({ ...editingAgentData, contact: e.target.value })} className="w-full px-3 py-2 rounded-xl border border-slate-300" /></div>
+                  </div>
+                  <div><label className="block font-bold text-slate-700 mb-1">主界面一句话重点/红线提醒</label><input type="text" value={editingAgentData.keyAlert || ''} onChange={(e) => setEditingAgentData({ ...editingAgentData, keyAlert: e.target.value })} className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-indigo-950" /></div>
+                  <div><label className="block font-bold text-slate-700 mb-1">运营交接详情备注</label><textarea rows={4} value={editingAgentData.operationsNote} onChange={(e) => setEditingAgentData({ ...editingAgentData, operationsNote: e.target.value })} className="w-full p-3 rounded-xl border border-slate-300 leading-relaxed" /></div>
+                  <div className="flex items-center gap-2">
+                    <input type="checkbox" id="editRenewalCheck" checked={editingAgentData.needsContractRenewal} onChange={(e) => setEditingAgentData({ ...editingAgentData, needsContractRenewal: e.target.checked, contractStatus: e.target.checked ? '有签合同，需更新' : '已签有效合同' })} />
+                    <label htmlFor="editRenewalCheck" className="font-bold text-amber-800">标记为“合同需跟进更新”</label>
+                  </div>
+                  <div className="pt-3 flex justify-end gap-2">
+                    <button type="button" onClick={() => setIsEditAgentModalOpen(false)} className="px-4 py-2 rounded-xl border border-slate-300 font-bold text-slate-600">取消</button>
+                    <button type="submit" className="px-5 py-2 rounded-xl bg-indigo-600 text-white font-bold">保存修改</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // 渲染应用挂载到根节点
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
