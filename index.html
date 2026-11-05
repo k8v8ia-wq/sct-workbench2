@@ -1,0 +1,1345 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SCT 代理商全景工作台</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- 引入 SheetJS (xlsx) 用于浏览器端原生解析任意格式的 .xlsx / .xls / .csv 套餐表格 -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif; background: #f8fafc; color: #0f172a; }
+    .line-clamp-1 { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+    .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .cell-edit:focus { outline: 2px solid #4f46e5; background: #eef2ff; border-radius: 4px; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+  <div id="app"></div>
+
+  <script>
+    // ==========================================
+    // 初始内置 19 家代理商完整数据（含自适应动态表格 packageTables）
+    // ==========================================
+    const DEFAULT_AGENTS = [
+      {
+        id: 'SCT0079',
+        name: '安总',
+        status: 'low_demand',
+        contact: '安总',
+        address: '无',
+        cardFee: 'eSIM：5 RMB',
+        settlement: '套餐结算',
+        contractStatus: '未提及',
+        needsContractRenewal: false,
+        totalCardsIssued: 0,
+        cardVolumeSummary: '出卡极少 (未激活可退)',
+        keyAlert: '退款直接在群里 @财务丽容 退；SIM免卡费',
+        operationsNote: '出卡量很少，很久没出过。偶尔会在群里问退款，如未激活使用，可以退，在群里@财务丽容退就行。eSIM收5 RMB/张，SIM卡 不收费，套餐价格包含卡费。',
+        packageTables: [],
+        cardLogs: []
+      },
+      {
+        id: 'SCT0161',
+        name: 'Future Power',
+        status: 'low_demand',
+        contact: 'Eddy Wo，60607070',
+        address: 'Unit 6B, 6/F, Union Building, No.112 How Ming Street, Kwun Tong, Kowloon, Hong Kong',
+        cardFee: '*',
+        settlement: '流量结算',
+        contractStatus: '有签合同，需更新',
+        needsContractRenewal: true,
+        totalCardsIssued: 0,
+        cardVolumeSummary: '换ORG后少用 (月度催款)',
+        keyAlert: '⚠️ 合同需更新 · 详情可问谢总',
+        operationsNote: '我接手后，没有需求。去年年底通知了换ORG后就基本没怎么用。偶尔使用了财务会发月度账单催付款。这个代理详细事情可以问谢总。有签合同，需更新。',
+        packageTables: [],
+        cardLogs: []
+      },
+      {
+        id: 'SCT0175',
+        name: '杰元生活馆',
+        status: 'active',
+        contact: '薛元閔，912163252',
+        address: 'No. 44, Ln. 42, Buhou St., Zuoying Dist., Kaohsiung City 813007, Taiwan (R.O.C.)，E122411619身份證',
+        cardFee: '3 HKD',
+        settlement: '套餐结算',
+        contractStatus: '有签合同，需更新',
+        needsContractRenewal: true,
+        portalUrl: 'https://agent.npnchina.com/',
+        totalCardsIssued: 120,
+        cardVolumeSummary: '近期量升 · 已划3000HKD至转售网',
+        keyAlert: '⚠️ 合同需更新 · 台湾卡需交非台营业执照',
+        operationsNote: '主出eSIM，最近开通了转售卡系统账户给代理，从代理商账户划转了3000港元到转售卡系统。最近量稍微多点。代理有出台湾卡的想法，需要提供非台湾公司的营业执照，有提醒过，暂时还没发来。有签合同，需更新。',
+        packageTables: [],
+        cardLogs: [
+          { id: 'LOG-0175-1', date: '2025-10', type: '转售系统出卡', quantity: 120, pkgName: 'eSIM 转售系统出卡', note: '从代理商账户划转 3000 HKD 到转售系统' }
+        ]
+      },
+      {
+        id: 'SCT0259',
+        name: '南方旅游',
+        status: 'active',
+        contact: 'Tammy (旅游部)',
+        address: '香港公司',
+        cardFee: '套餐价含卡费',
+        settlement: '套餐结算',
+        contractStatus: '内部协同部门',
+        needsContractRenewal: false,
+        credentials: { account: 'sct0259', password: '259qwe' },
+        totalCardsIssued: 300,
+        cardVolumeSummary: '常出帕劳卡 · 发一单充一单',
+        keyAlert: '🔑 账号sct0259 · 常用ID:330259005 · 盯白卡备货',
+        operationsNote: '这个代理号是给旅游部Tammy他们出帕劳卡的，有需求就帮他们申请，需要代发，香港是Hilda代发，深圳代发未知交接给谁。白卡和卡封套数量不足要及时备货，通常是发一单充值一单（记得充值，最常用的就是ID：330259005-港澳帕劳12天10GB），账户余额不足跟姚总说一下加余额，同意后找丽容加。代理商账号：sct0259 密码： 259qwe',
+        packageTables: [
+          {
+            id: 'TBL-0259-DEFAULT',
+            fileName: '南方旅游_常用帕劳套餐表.xlsx',
+            sheetName: '帕劳套餐',
+            updatedAt: '2025-11-05',
+            headers: ['套餐ID', '套餐名称', '目的地', '天数', '流量规格', '结算价格', '卡类型', '操作备注'],
+            rows: [
+              ['330259005', '港澳帕劳12天10GB', '港澳 / 帕劳', '12天', '10GB', '套餐价含卡费', '实体白卡(配封套)', '最常用主力套餐，切记发一单充值一单']
+            ]
+          }
+        ],
+        cardLogs: [
+          { id: 'LOG-0259-1', date: '日常持续出卡', type: '实体白卡代发', quantity: 300, pkgName: '330259005 - 港澳帕劳12天10GB', note: '香港由Hilda代发，发一单充值一单' }
+        ]
+      },
+      {
+        id: 'SCT0288',
+        name: 'ICS',
+        status: 'low_demand',
+        contact: '无',
+        address: '无',
+        cardFee: '*',
+        settlement: '套餐结算',
+        contractStatus: '未提及',
+        needsContractRenewal: false,
+        totalCardsIssued: 0,
+        cardVolumeSummary: '出卡极少 (偶发水单充值)',
+        keyAlert: '偶尔发水单充值余额，无新增需求',
+        operationsNote: '我接手时就没有资料，没有新增需求。代理偶尔会发水单来充值余额，出卡量很少。',
+        packageTables: [],
+        cardLogs: []
+      },
+      {
+        id: 'SCT0315',
+        name: 'GLOBEE LIMITED',
+        status: 'active',
+        contact: '杨韵怡，amy.yang@aotech.co',
+        address: '无，代理在深圳办公',
+        cardFee: '3 HKD',
+        settlement: '流量结算',
+        contractStatus: '8月重签合同(12月考核平台费)',
+        needsContractRenewal: false,
+        totalCardsIssued: 0,
+        cardVolumeSummary: '已付押金5万HKD · 待正式起量',
+        keyAlert: '📋 需回填客户需求表 · 12月起平台费考核(问杨总)',
+        operationsNote: '有付过押金5万港元。爱提需求，但一直未正式起步出卡（主出eSIM），他们有自己的需求表，我们申请完后再填到他们的需求表上。8月沟通后重新签了合同，三个月免平台费，12月开始未达到销售额要收取，具体问杨总。',
+        packageTables: [],
+        cardLogs: []
+      },
+      {
+        id: 'SCT0316',
+        name: '未来通讯技术',
+        status: 'active',
+        contact: '向敏，xm13681152536@126.com',
+        address: '金钟道89号力宝中心2座1204B室',
+        cardFee: '3 HKD',
+        settlement: '流量结算',
+        contractStatus: '有签合同，需更新',
+        needsContractRenewal: true,
+        totalCardsIssued: 50,
+        cardVolumeSummary: '主出带香港号码eSIM',
+        keyAlert: '⚠️ 合同需更新 · 黄总朋友 · 主出香港号套餐',
+        operationsNote: '黄总朋友，主要出带香港号码的套餐。eSIM为主，SIM卡较少。总体出的卡也不多，有签合同，需更新。',
+        packageTables: [],
+        cardLogs: [
+          { id: 'LOG-0316-1', date: '日常出卡', type: 'eSIM为主', quantity: 50, pkgName: '带香港号码 eSIM 套餐', note: '黄总朋友，eSIM为主' }
+        ]
+      },
+      {
+        id: 'SCT0334',
+        name: 'NEWTECH LIFE LIMITED',
+        status: 'active',
+        contact: '刘丽，alice.liu@newtechlife.net',
+        address: 'Room 701, Unit 127, 7/F, Tower B, New Mandarin Plaza, 14 Science Museum Road, Tsim Sha Tsui, Kowloon',
+        cardFee: '2 HKD',
+        settlement: '流量结算',
+        contractStatus: '已签有效合同',
+        needsContractRenewal: false,
+        totalCardsIssued: 60,
+        cardVolumeSummary: '主出台湾卡 · API对接中',
+        keyAlert: '🔌 常问API对接(群内有开发) · 主出台湾卡',
+        operationsNote: '爱提需求，经常问API对接的事，群里有开发在。主要出台湾卡，量也不大。有签合同。',
+        packageTables: [],
+        cardLogs: [
+          { id: 'LOG-0334-1', date: '日常出卡', type: '台湾卡', quantity: 60, pkgName: '台湾流量套餐 (API对接)', note: '主要出台湾卡，群内有技术开发对接' }
+        ]
+      },
+      {
+        id: 'SCT0338',
+        name: 'Sim International',
+        status: 'low_demand',
+        contact: 'Mr. Son Nguyen，+84 396931192',
+        address: '64A Alley number 530, Thuy Khue Street, Tay Ho District, Hanoi, Vietnam',
+        cardFee: '*',
+        settlement: '流量结算',
+        contractStatus: '有签合同，需更新',
+        needsContractRenewal: true,
+        totalCardsIssued: 0,
+        cardVolumeSummary: '长期未出卡 (前销售纠纷)',
+        keyAlert: '⚠️ 合同需更新 · 前销售经济纠纷 · 报价未达预期',
+        operationsNote: '跟之前的销售有经济纠纷，现在已经很久没出过卡了。后来有沟通过报价，达不到代理预期。有签合同，需更新。',
+        packageTables: [],
+        cardLogs: []
+      },
+      {
+        id: 'SCT0342',
+        name: 'New Generation (HK) Technology Company Limited',
+        status: 'low_demand',
+        contact: 'Tony Lai，46246795',
+        address: 'Unit 717, 7/F., Peninsula Centre, 67 Mody Road, Tsim Sha Tsui, Hong Kong',
+        cardFee: '*',
+        settlement: '套餐结算',
+        contractStatus: '未提及',
+        needsContractRenewal: false,
+        totalCardsIssued: 0,
+        cardVolumeSummary: '未出过卡 / 无新增需求',
+        keyAlert: '接手后无新增需求，未出过卡',
+        operationsNote: '我接手后，没有新增需求。没出过卡和新增套餐。',
+        packageTables: [],
+        cardLogs: []
+      },
+      {
+        id: 'SCT0344',
+        name: 'INOMAAS TECH LIMITED',
+        status: 'active',
+        contact: '孙僮检 | tjsun@inovai.tech | 15323758517',
+        address: '金钟道89号力宝中心2座1204B室',
+        cardFee: '3 HKD',
+        settlement: '流量结算',
+        contractStatus: '已签有效合同',
+        needsContractRenewal: false,
+        totalCardsIssued: 40,
+        cardVolumeSummary: '主出eSIM (原与316同司)',
+        keyAlert: '主出eSIM · 原与SCT0316同公司后拆分',
+        operationsNote: '之前是跟316一个公司，后来用单独的香港公司申请分开了。主出eSIM，有签合同。',
+        packageTables: [],
+        cardLogs: []
+      },
+      {
+        id: 'SCT0353',
+        name: '云栋国际有限公司',
+        status: 'active',
+        contact: '何瑞康，13922201642',
+        address: '无，代理在广州办公',
+        cardFee: '2.5 HKD',
+        settlement: '流量结算',
+        contractStatus: '有签合同，需更新',
+        needsContractRenewal: true,
+        totalCardsIssued: 0,
+        cardVolumeSummary: '已给报价 · 尚未正式出卡',
+        keyAlert: '⚠️ 合同需更新 · 广州办公 · 已给报价待出卡',
+        operationsNote: '给过报价，没正式出卡。有签合同，需更新。',
+        packageTables: [],
+        cardLogs: []
+      },
+      {
+        id: 'SCT0378',
+        name: 'DACE GLOBAL CONNECT',
+        status: 'active',
+        contact: 'Billy，60103858018',
+        address: '无',
+        cardFee: '3 HKD',
+        settlement: '套餐结算',
+        contractStatus: '有签合同，需更新',
+        needsContractRenewal: true,
+        portalUrl: 'https://agent.npnchina.com/',
+        totalCardsIssued: 0,
+        cardVolumeSummary: '划转1.5万HKD至转售网(工单中)',
+        keyAlert: '⏳ 15000 HKD划转工单申请中 · ⚠️ 合同需更新',
+        operationsNote: '黄总朋友，代理主出eSIM，开通转售卡账户中，从代理商账户划转15000港元到转售卡账户，工单还在申请中。有签合同，需更新。',
+        packageTables: [],
+        cardLogs: []
+      },
+      {
+        id: 'SCT0393',
+        name: 'NOVACELL SOLUTIONS INC',
+        status: 'low_demand',
+        contact: '大卫',
+        address: '无',
+        cardFee: '0.449000 USD',
+        settlement: '流量结算',
+        contractStatus: '已签有效合同',
+        needsContractRenewal: false,
+        totalCardsIssued: 10,
+        cardVolumeSummary: '前期测试后无声量',
+        keyAlert: '🚫 加拿大公司严禁使用加拿大本地流量',
+        operationsNote: '这个代理是谢总转交过来，接手后前期一直在测试，一直想测加拿大的流量，代理是加拿大公司不允许本地流量。后面没声量了。有签合同。',
+        packageTables: [],
+        cardLogs: []
+      },
+      {
+        id: 'SCT0396',
+        name: '中郵新媒體國際有限公司',
+        status: 'low_demand',
+        contact: 'Philip Kao | Kaophil@gmail.com | 91556297',
+        address: '无',
+        cardFee: '套餐价含卡费',
+        settlement: '套餐结算',
+        contractStatus: '已签有效合同',
+        needsContractRenewal: false,
+        totalCardsIssued: 30,
+        cardVolumeSummary: '主出eSIM (俄罗斯终端客户)',
+        keyAlert: '客户为俄罗斯人 · 套餐价含卡费 · 主出eSIM',
+        operationsNote: '代理客户是俄罗斯人，套餐价格包含卡费，主出eSIM，有签合同。',
+        packageTables: [],
+        cardLogs: []
+      },
+      {
+        id: 'SCT0398',
+        name: '香港精靈機器人自動化有限公司',
+        status: 'low_demand',
+        contact: '胡祖安 | hu10010@gmail.com | (852) 63120612',
+        address: '无',
+        cardFee: '2 HKD',
+        settlement: '套餐结算',
+        contractStatus: '已签有效合同',
+        needsContractRenewal: false,
+        totalCardsIssued: 500,
+        cardVolumeSummary: '已出 500 张空白卡 (400 CMI + 100 PMCI)',
+        keyAlert: '🚫 发给代理的产品表必须【去掉FUP】！',
+        operationsNote: '套餐结算，卡费收2 HKD。\n发给代理的产品表去掉FUP。\n2025-10-28 出过400张CMI空白卡、100张PMCI空白卡。有签合同。',
+        packageTables: [
+          {
+            id: 'TBL-0398-DEFAULT',
+            fileName: 'SCT0398_空白卡与去FUP产品表.xlsx',
+            sheetName: '出货与报价表(去FUP)',
+            updatedAt: '2025-10-28',
+            headers: ['产品编码', '产品/套餐名称', '卡类型', '结算卡费/价格', '已出货数量', '特别合规要求'],
+            rows: [
+              ['BLANK-CMI-400', 'CMI 空白实体卡', 'CMI 空白卡', '2 HKD', '400 张', '发给代理的产品表必须去掉 FUP'],
+              ['BLANK-PMCI-100', 'PMCI 空白实体卡', 'PMCI 空白卡', '2 HKD', '100 张', '发给代理的产品表必须去掉 FUP']
+            ]
+          }
+        ],
+        cardLogs: [
+          { id: 'LOG-0398-1', date: '2025-10-28', type: 'CMI 空白卡出货', quantity: 400, pkgName: 'CMI 空白卡 (卡费 2 HKD)', note: '发给代理的产品表必须去掉FUP' },
+          { id: 'LOG-0398-2', date: '2025-10-28', type: 'PMCI 空白卡出货', quantity: 100, pkgName: 'PMCI 空白卡 (卡费 2 HKD)', note: '发给代理的产品表必须去掉FUP' }
+        ]
+      },
+      {
+        id: 'SCT0371',
+        name: 'Solutions4U Global LLP',
+        status: 'dormant',
+        contact: '无',
+        address: '无',
+        cardFee: '*',
+        settlement: '流量结算',
+        contractStatus: '有签合同，需更新',
+        needsContractRenewal: true,
+        totalCardsIssued: 0,
+        cardVolumeSummary: '一年以上无动静',
+        keyAlert: '⚠️ 合同需更新 · 一年以上无动静',
+        operationsNote: '【一年以上没有动静的代理】我接手后，没有需求，有合同，需更新。',
+        packageTables: [],
+        cardLogs: []
+      },
+      {
+        id: 'SCT0264',
+        name: '香港-合成電訊有限公司',
+        status: 'dormant',
+        contact: '佳佳',
+        address: '彌敦道608號總統大廈1401（之前LEO給的地址，不知有沒有變動）',
+        cardFee: '*',
+        settlement: '流量结算',
+        contractStatus: '未提及',
+        needsContractRenewal: false,
+        totalCardsIssued: 0,
+        cardVolumeSummary: '一年以上无动静 (历史纠纷)',
+        keyAlert: '与前销售有经济纠纷，很久未出卡',
+        operationsNote: '【一年以上没有动静的代理】跟之前的销售有经济纠纷，现在已经很久没出过卡了。',
+        packageTables: [],
+        cardLogs: []
+      },
+      {
+        id: 'SCT0272',
+        name: 'CHANGI TRAVEL SERVICES PLE.LTD',
+        status: 'dormant',
+        contact: '武藤',
+        address: '新加坡樟宜機場',
+        cardFee: '*',
+        settlement: '套餐结算',
+        contractStatus: '未提及',
+        needsContractRenewal: false,
+        totalCardsIssued: 0,
+        cardVolumeSummary: '一年+无动静 (原价极低纯亏本)',
+        keyAlert: '🚨 历史给价极低纯亏本，重启用务必重谈价格！',
+        operationsNote: '【一年以上没有动静的代理】很久都没动静，这个代理之前的价格给的很低，纯亏本出。',
+        packageTables: [],
+        cardLogs: []
+      }
+    ];
+
+    const DEFAULT_FILES = [
+      {
+        id: 'DOC-1',
+        agentId: 'SCT0259',
+        name: 'SCT0259_南方旅游_帕劳卡代发与充值操作手册.txt',
+        category: '操作规范',
+        size: '1.2 KB',
+        uploadDate: '2025-11-05',
+        textContent: `【SCT0259 南方旅游 - 帕劳卡交接指引】\n1. 对接人：旅游部 Tammy\n2. 后台账号：sct0259 密码：259qwe\n3. 最常用套餐ID：330259005 (港澳帕劳12天10GB)\n4. 发卡铁律：发一单充值一单！香港由 Hilda 代发，白卡和卡封套不足及时备货；余额不足跟姚总报备同意后找丽容加。`
+      },
+      {
+        id: 'DOC-2',
+        agentId: 'SCT0398',
+        name: 'SCT0398_香港精灵机器人_去FUP与出卡档案.txt',
+        category: '合同文件',
+        size: '0.9 KB',
+        uploadDate: '2025-10-28',
+        textContent: `【SCT0398 香港精靈機器人自動化有限公司】\n1. 联系人：胡祖安 (852) 63120612\n2. 结算方式：套餐结算，卡费 2 HKD\n3. 红线提醒：发给代理的产品表必须去掉 FUP 说明！\n4. 出货记录：2025-10-28 出过400张CMI空白卡、100张PMCI空白卡。`
+      }
+    ];
+
+    // ==========================================
+    // 状态管理与 LocalStorage 持久化
+    // ==========================================
+    const STORAGE_KEY = 'sct_workbench_xlsx_v4';
+    let appState = {
+      agents: DEFAULT_AGENTS,
+      files: DEFAULT_FILES,
+      search: '',
+      filter: 'all',
+      settlementFilter: 'all',
+      activeAgentId: null,
+      pkgSearchInAgent: '', // 代理详情页内部套餐搜索词
+      previewFile: null,
+      isUploadOpen: false,
+      uploadTab: 'xlsx_pkg', // 'xlsx_pkg' | 'file'
+      uploadTarget: 'SCT0079',
+      uploadCategory: '合同文件',
+      xlsxImportMode: 'replace', // 'replace' (覆盖更新同名/旧套餐表) | 'append' (追加为新套餐表)
+      pendingXlsxSheets: null, // 暂存刚选中的 Excel 解析出来的多工作表预览
+      pendingXlsxFileName: '',
+      toastMsg: ''
+    };
+
+    // 读取本地存储并兼容旧数据结构
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed.agents) && parsed.agents.length > 0) {
+          appState.agents = parsed.agents.map(a => ({
+            ...a,
+            packageTables: Array.isArray(a.packageTables) ? a.packageTables : []
+          }));
+        }
+        if (Array.isArray(parsed.files)) {
+          appState.files = parsed.files;
+        }
+      }
+    } catch(e) {
+      console.warn('LocalStorage load error', e);
+    }
+
+    function saveState() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+          agents: appState.agents,
+          files: appState.files
+        }));
+      } catch (e) {
+        console.warn('LocalStorage save error', e);
+      }
+    }
+
+    function showToast(msg) {
+      appState.toastMsg = msg;
+      render();
+      setTimeout(() => {
+        if (appState.toastMsg === msg) {
+          appState.toastMsg = '';
+          render();
+        }
+      }, 2800);
+    }
+
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function copyText(txt, label) {
+      if (!txt) return;
+      navigator.clipboard.writeText(txt).then(() => {
+        showToast(`已复制 ${label}：${txt}`);
+      });
+    }
+
+    // 统计某代理下所有套餐表格的总套餐行数
+    function getAgentTotalPkgRows(agent) {
+      if (!agent.packageTables || agent.packageTables.length === 0) return 0;
+      return agent.packageTables.reduce((sum, tbl) => sum + (tbl.rows ? tbl.rows.length : 0), 0);
+    }
+
+    // ==========================================
+    // 渲染主函数
+    // ==========================================
+    function render() {
+      const root = document.getElementById('app');
+      const q = appState.search.trim().toLowerCase();
+
+      const total = appState.agents.length;
+      const activeCount = appState.agents.filter(a => a.status === 'active').length;
+      const renewalCount = appState.agents.filter(a => a.needsContractRenewal).length;
+      const lowDemandCount = appState.agents.filter(a => a.status === 'low_demand').length;
+      const dormantCount = appState.agents.filter(a => a.status === 'dormant').length;
+      const totalPkgs = appState.agents.reduce((acc, a) => acc + getAgentTotalPkgRows(a), 0);
+      const totalCards = appState.agents.reduce((acc, a) => acc + (Number(a.totalCardsIssued) || 0), 0);
+
+      // 过滤代理商
+      const filteredAgents = appState.agents.filter(a => {
+        if (appState.filter === 'active' && a.status !== 'active') return false;
+        if (appState.filter === 'renewal' && !a.needsContractRenewal) return false;
+        if (appState.filter === 'low_demand' && a.status !== 'low_demand') return false;
+        if (appState.filter === 'dormant' && a.status !== 'dormant') return false;
+        if (appState.settlementFilter !== 'all' && a.settlement !== appState.settlementFilter) return false;
+        if (!q) return true;
+        const matchBasic = a.id.toLowerCase().includes(q) || a.name.toLowerCase().includes(q) || (a.contact||'').toLowerCase().includes(q) || (a.operationsNote||'').toLowerCase().includes(q) || (a.keyAlert||'').toLowerCase().includes(q);
+        const matchPkgTable = (a.packageTables||[]).some(tbl =>
+          tbl.fileName.toLowerCase().includes(q) ||
+          tbl.headers.some(h => String(h).toLowerCase().includes(q)) ||
+          tbl.rows.some(r => r.some(cell => String(cell).toLowerCase().includes(q)))
+        );
+        const matchFile = appState.files.filter(f => f.agentId === a.id).some(f => f.name.toLowerCase().includes(q));
+        return matchBasic || matchPkgTable || matchFile;
+      });
+
+      // 全局搜索直接命中的套餐行（跨代理不同格式表格智能检索）
+      const matchedPkgRows = [];
+      if (q) {
+        appState.agents.forEach(a => {
+          (a.packageTables || []).forEach(tbl => {
+            tbl.rows.forEach((row, rIdx) => {
+              if (row.some(cell => String(cell).toLowerCase().includes(q))) {
+                const summary = row.slice(0, 5).map((val, cIdx) => `${tbl.headers[cIdx] || '列'+(cIdx+1)}: ${val}`).join(' | ');
+                matchedPkgRows.push({
+                  agentId: a.id,
+                  agentName: a.name,
+                  fileName: tbl.fileName,
+                  summary
+                });
+              }
+            });
+          });
+        });
+      }
+
+      const activeAgent = appState.activeAgentId ? appState.agents.find(a => a.id === appState.activeAgentId) : null;
+      const agentFiles = activeAgent ? appState.files.filter(f => f.agentId === activeAgent.id || f.agentId === 'ALL') : [];
+
+      let html = `
+        <!-- 顶部导航栏 -->
+        <header class="bg-slate-900 text-white sticky top-0 z-30 shadow-md">
+          <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center gap-3 cursor-pointer" onclick="closeAgent()">
+              <div class="w-10 h-10 rounded-xl bg-indigo-500 flex items-center justify-center text-white font-black text-base shadow-xs">SCT</div>
+              <div>
+                <h1 class="text-base sm:text-lg font-extrabold tracking-tight">SCT 代理商全景工作台</h1>
+                <p class="text-xs text-slate-400">共 ${total} 家代理 · 已导入 ${totalPkgs} 条套餐报价 · ${appState.files.length} 份合同附件 · 累计出卡 ${totalCards} 张</p>
+              </div>
+            </div>
+
+            <div class="relative flex-1 min-w-[270px] max-w-xl">
+              <input id="globalSearch" type="text" value="${escapeHtml(appState.search)}" placeholder="搜索代理号(0175/259)、任意Excel套餐里的国家/价格/ID、或合同文件..." class="w-full pl-4 pr-16 py-2.5 bg-slate-800 rounded-xl border border-slate-700 focus:border-indigo-400 focus:outline-none text-sm text-white placeholder-slate-400" />
+              ${appState.search ? `<button onclick="clearSearch()" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs bg-slate-700 hover:bg-slate-600 px-2 py-0.5 rounded text-slate-200">清除</button>` : ''}
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button onclick="openUploadModal('xlsx_pkg')" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs sm:text-sm font-bold shadow-xs cursor-pointer">
+                📊 上传/更新代理套餐 (.xlsx)
+              </button>
+              <button onclick="openUploadModal('file')" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold cursor-pointer">
+                📄 上传合同文件
+              </button>
+              <button onclick="exportBackup()" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold cursor-pointer" title="导出全量备份(.json)">
+                备份
+              </button>
+              <input type="file" id="restoreJsonInput" accept=".json" class="hidden" onchange="restoreBackup(event)" />
+              <button onclick="document.getElementById('restoreJsonInput').click()" class="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold cursor-pointer">
+                恢复
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <!-- Toast 提示 -->
+        ${appState.toastMsg ? `
+          <div class="fixed bottom-5 right-5 z-50 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-2xl border border-slate-700 flex items-center gap-2 text-sm font-bold">
+            <span class="text-emerald-400">✔</span> ${escapeHtml(appState.toastMsg)}
+          </div>
+        ` : ''}
+      `;
+
+      if (activeAgent) {
+        // ==========================================
+        // 代理商全景详情页（支持任意格式 Excel 套餐查看、搜索、点击单元格直接改价更新）
+        // ==========================================
+        const pkgQuery = appState.pkgSearchInAgent.trim().toLowerCase();
+        const pkgTables = activeAgent.packageTables || [];
+
+        html += `
+          <main class="max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <button onclick="closeAgent()" class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white border border-slate-200 text-sm font-bold text-slate-700 hover:bg-slate-100 shadow-xs cursor-pointer">
+                ← 返回全部代理商列表
+              </button>
+              <div class="flex items-center gap-2 text-xs text-slate-500">
+                <span>快速切换代理：</span>
+                <select onchange="openAgent(this.value)" class="px-3 py-1.5 rounded-xl border border-slate-300 text-slate-900 font-bold bg-white">
+                  ${appState.agents.map(a => `<option value="${a.id}" ${a.id === activeAgent.id ? 'selected' : ''}>${a.id} - ${escapeHtml(a.name)}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+
+            <!-- 顶部核心商务概览 -->
+            <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
+              <div class="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                <div class="flex items-center gap-3 flex-wrap">
+                  <span class="px-3 py-1 rounded-lg bg-indigo-600 text-white font-mono text-base font-bold">${escapeHtml(activeAgent.id)}</span>
+                  <h2 class="text-2xl font-black text-slate-900">${escapeHtml(activeAgent.name)}</h2>
+                  <span class="px-3 py-0.5 rounded-full text-xs font-bold ${activeAgent.status==='active'?'bg-emerald-100 text-emerald-800':activeAgent.status==='low_demand'?'bg-slate-200 text-slate-700':'bg-amber-100 text-amber-800'}">
+                    ${activeAgent.status==='active'?'主力活跃':activeAgent.status==='low_demand'?'很少需求(标灰)':'一年+无动静'}
+                  </span>
+                  ${activeAgent.needsContractRenewal ? '<span class="px-3 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300">⚠️ 合同需更新</span>' : ''}
+                </div>
+                <div class="text-xs text-slate-600">
+                  对接人：<strong class="text-slate-900">${escapeHtml(activeAgent.contact)}</strong> | 地址：${escapeHtml(activeAgent.address)}
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 my-5">
+                <div class="p-4 rounded-xl bg-indigo-50 border border-indigo-100"><div class="text-xs text-indigo-700 font-bold">结算方式</div><div class="text-lg font-black text-slate-900 mt-1">${escapeHtml(activeAgent.settlement)}</div></div>
+                <div class="p-4 rounded-xl bg-emerald-50 border border-emerald-100"><div class="text-xs text-emerald-700 font-bold">卡费标准</div><div class="text-lg font-black text-emerald-800 mt-1">${escapeHtml(activeAgent.cardFee)}</div></div>
+                <div class="p-4 rounded-xl bg-blue-50 border border-blue-100"><div class="text-xs text-blue-700 font-bold">累计出卡数量</div><div class="text-lg font-black text-blue-900 mt-1">${activeAgent.totalCardsIssued > 0 ? activeAgent.totalCardsIssued + ' 张' : escapeHtml(activeAgent.cardVolumeSummary)}</div></div>
+                <div class="p-4 rounded-xl bg-amber-50 border border-amber-100"><div class="text-xs text-amber-800 font-bold">合同状态</div><div class="text-base font-black text-amber-950 mt-1">${escapeHtml(activeAgent.contractStatus)}</div></div>
+              </div>
+
+              ${activeAgent.credentials ? `
+                <div class="mb-4 p-4 rounded-xl bg-indigo-950 text-white flex flex-wrap items-center justify-between gap-3 text-xs">
+                  <div class="flex items-center gap-3">
+                    <span class="text-amber-300 font-bold">🔑 代理商登录账号密码：</span>
+                    <span class="font-mono bg-slate-800 px-2.5 py-1 rounded">账号: ${activeAgent.credentials.account}</span>
+                    <span class="font-mono bg-slate-800 px-2.5 py-1 rounded">密码: ${activeAgent.credentials.password}</span>
+                  </div>
+                  <button onclick="copyText('${activeAgent.credentials.account} / ${activeAgent.credentials.password}', '账号密码')" class="text-xs text-indigo-300 hover:underline">点击复制</button>
+                </div>
+              ` : ''}
+
+              <div class="p-4 rounded-xl bg-amber-50/90 border border-amber-200">
+                <div class="text-xs font-bold text-amber-900 mb-1">📌 运营交接情况与注意事项：</div>
+                <p class="text-sm text-slate-900 whitespace-pre-line leading-relaxed">${escapeHtml(activeAgent.operationsNote)}</p>
+              </div>
+            </div>
+
+            <!-- ========================================== -->
+            <!-- 核心升级板块：📦 专属套餐与价格表（自适应任意代理 .xlsx 表头 + 在线改价 + 一键重传更新） -->
+            <!-- ========================================== -->
+            <div class="bg-white rounded-2xl border-2 border-indigo-100 p-6 shadow-xs">
+              <div class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100">
+                <div>
+                  <h3 class="text-base sm:text-lg font-extrabold text-slate-900 flex items-center gap-2">
+                    📊 ${escapeHtml(activeAgent.name)} — 套餐与价格表 (共 ${getAgentTotalPkgRows(activeAgent)} 条记录)
+                  </h3>
+                  <p class="text-xs text-slate-500 mt-0.5">
+                    完美兼容不同代理各自的 Excel 表头格式 · <strong>直接点击表格内任意价格或文字即可实时修改并自动保存</strong>，或重新上传新 Excel 覆盖更新
+                  </p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <input id="agentPkgSearchInput" type="text" value="${escapeHtml(appState.pkgSearchInAgent)}" placeholder="在当前代理套餐中筛选国家/价格/ID..." class="px-3 py-1.5 rounded-xl border border-slate-300 text-xs bg-slate-50 focus:bg-white focus:outline-none w-56" />
+                  <button onclick="openXlsxModalForAgent('${activeAgent.id}')" class="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs cursor-pointer">
+                    📤 上传 / 更新套餐 Excel (.xlsx)
+                  </button>
+                </div>
+              </div>
+
+              ${activeAgent.id === 'SCT0398' ? `
+                <div class="my-3 px-4 py-2.5 rounded-xl bg-rose-50 border border-rose-200 text-xs font-bold text-rose-800">
+                  🚫 红线提醒：发给【香港精靈機器人自動化有限公司 (SCT0398)】的产品表必须去掉 FUP 说明！
+                </div>
+              ` : ''}
+
+              ${pkgTables.length === 0 ? `
+                <div class="my-6 p-10 text-center border-2 border-dashed border-indigo-200 rounded-2xl bg-indigo-50/30">
+                  <p class="text-sm font-bold text-slate-700">暂未上传 ${escapeHtml(activeAgent.name)} 的套餐报价表</p>
+                  <p class="text-xs text-slate-500 mt-1">无论该代理的 Excel 表格是什么列格式，直接上传 .xlsx 文件即可原样解析展示并支持后续随时改价</p>
+                  <button onclick="openXlsxModalForAgent('${activeAgent.id}')" class="mt-4 px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold shadow-xs cursor-pointer">
+                    + 立即上传该代理的 .xlsx 套餐文件
+                  </button>
+                </div>
+              ` : `
+                <div class="space-y-6 mt-4">
+                  ${pkgTables.map((tbl, tIdx) => {
+                    const filteredRows = tbl.rows
+                      .map((r, rIdx) => ({ r, rIdx }))
+                      .filter(item => !pkgQuery || item.r.some(cell => String(cell).toLowerCase().includes(pkgQuery)));
+
+                    return `
+                      <div class="rounded-xl border border-slate-200 overflow-hidden">
+                        <div class="px-4 py-3 bg-slate-900 text-white flex flex-wrap items-center justify-between gap-2 text-xs">
+                          <div class="flex items-center gap-2">
+                            <span class="px-2 py-0.5 rounded bg-indigo-500 font-bold">表格 ${tIdx + 1}</span>
+                            <strong class="text-sm">${escapeHtml(tbl.fileName)}</strong>
+                            ${tbl.sheetName ? `<span class="text-slate-400">(${escapeHtml(tbl.sheetName)})</span>` : ''}
+                            <span class="text-slate-400">· 更新于 ${escapeHtml(tbl.updatedAt || '近期')} · 共 ${tbl.rows.length} 行</span>
+                          </div>
+                          <div class="flex items-center gap-2">
+                            <button onclick="addRowToPkgTable('${activeAgent.id}', ${tIdx})" class="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold cursor-pointer">+ 新增一行套餐</button>
+                            <button onclick="exportSinglePkgTableToXlsx('${activeAgent.id}', ${tIdx})" class="px-2.5 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-100 font-semibold cursor-pointer">⬇️ 导出最新 .xlsx</button>
+                            <button onclick="deletePkgTable('${activeAgent.id}', ${tIdx})" class="px-2 py-1 rounded bg-rose-600/80 hover:bg-rose-600 text-white font-semibold cursor-pointer">删除此表</button>
+                          </div>
+                        </div>
+
+                        <div class="overflow-x-auto max-h-[520px]">
+                          <table class="w-full text-left border-collapse text-xs">
+                            <thead class="sticky top-0 z-10">
+                              <tr class="bg-slate-100 text-slate-700 font-extrabold border-b border-slate-200">
+                                <th class="py-2.5 px-3 w-10 text-center text-slate-400">#</th>
+                                ${tbl.headers.map((h, hIdx) => `
+                                  <th class="py-2.5 px-3 whitespace-nowrap">${escapeHtml(h || '列' + (hIdx + 1))}</th>
+                                `).join('')}
+                                <th class="py-2.5 px-3 text-right w-16">操作</th>
+                              </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100">
+                              ${filteredRows.length === 0 ? `
+                                <tr><td colspan="${tbl.headers.length + 2}" class="p-6 text-center text-slate-400">没有匹配 “${escapeHtml(appState.pkgSearchInAgent)}” 的套餐行</td></tr>
+                              ` : filteredRows.map(({ r, rIdx }) => `
+                                <tr class="hover:bg-indigo-50/40 transition">
+                                  <td class="py-2 px-3 text-center font-mono text-slate-400">${rIdx + 1}</td>
+                                  ${tbl.headers.map((_, cIdx) => {
+                                    const val = r[cIdx] !== undefined && r[cIdx] !== null ? r[cIdx] : '';
+                                    const hdrName = String(tbl.headers[cIdx] || '');
+                                    const isPriceCol = hdrName.includes('价') || hdrName.includes('费') || hdrName.toLowerCase().includes('price') || hdrName.toLowerCase().includes('hkd') || hdrName.toLowerCase().includes('usd') || hdrName.toLowerCase().includes('rmb');
+                                    return `
+                                      <td
+                                        contenteditable="true"
+                                        onblur="updatePkgCellValue('${activeAgent.id}', ${tIdx}, ${rIdx}, ${cIdx}, this.innerText)"
+                                        class="py-2.5 px-3 cell-edit cursor-text ${isPriceCol ? 'font-extrabold text-emerald-700 bg-emerald-50/30' : 'text-slate-800'}"
+                                        title="点击直接修改内容，移开鼠标自动保存"
+                                      >${escapeHtml(val)}</td>
+                                    `;
+                                  }).join('')}
+                                  <td class="py-2 px-3 text-right">
+                                    <button onclick="deleteRowFromPkgTable('${activeAgent.id}', ${tIdx}, ${rIdx})" class="text-slate-400 hover:text-rose-600 font-bold" title="删除此行">✕</button>
+                                  </td>
+                                </tr>
+                              `).join('')}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+              `}
+            </div>
+
+            <!-- 合同与附件资料板块 -->
+            <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="text-base font-bold text-slate-900">📄 合同文件与资料附件 (${agentFiles.length})</h3>
+                <button onclick="openFileModalForAgent('${activeAgent.id}')" class="text-xs font-bold text-indigo-600 hover:underline cursor-pointer">+ 上传合同/附件到此代理</button>
+              </div>
+              ${agentFiles.length === 0 ? '<p class="text-xs text-slate-400">暂未上传合同或附件</p>' : `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  ${agentFiles.map(f => `
+                    <div class="p-3.5 rounded-xl border border-slate-200 flex items-center justify-between gap-3 bg-slate-50">
+                      <div>
+                        <div class="text-sm font-bold text-slate-900">${escapeHtml(f.name)}</div>
+                        <div class="text-xs text-slate-500 mt-0.5">${escapeHtml(f.category)} · ${escapeHtml(f.size)} · ${escapeHtml(f.uploadDate)}</div>
+                      </div>
+                      <div class="flex items-center gap-2 shrink-0">
+                        <button onclick="previewDoc('${f.id}')" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold cursor-pointer">在线阅览</button>
+                        <button onclick="downloadDoc('${f.id}')" class="px-2.5 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-700 text-xs font-bold cursor-pointer">下载</button>
+                      </div>
+                    </div>
+                  `).join('')}
+                </div>
+              `}
+            </div>
+
+            <!-- 出卡流水板块 -->
+            <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="text-base font-bold text-slate-900">📊 出卡流水与记录 (${(activeAgent.cardLogs||[]).length})</h3>
+                <button onclick="promptAddCard('${activeAgent.id}')" class="text-xs font-bold text-emerald-600 hover:underline cursor-pointer">+ 登记出卡数量</button>
+              </div>
+              ${(activeAgent.cardLogs||[]).length === 0 ? '<p class="text-xs text-slate-400">暂无出卡明细流水</p>' : `
+                <div class="space-y-2">
+                  ${activeAgent.cardLogs.map(l => `
+                    <div class="p-3 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <div>
+                        <span class="font-mono font-bold text-slate-600 mr-2">${escapeHtml(l.date)}</span>
+                        <span class="px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 font-bold mr-2">${escapeHtml(l.type)}</span>
+                        <strong class="text-slate-900">${escapeHtml(l.pkgName)}</strong>
+                      </div>
+                      <div class="text-slate-600">
+                        ${l.quantity > 0 ? `<strong class="text-emerald-700 mr-2">数量: ${l.quantity} 张</strong>` : ''}
+                        ${escapeHtml(l.note)}
+                      </div>
+                    </div>
+                  `).join('')}
+                </div>
+              `}
+            </div>
+          </main>
+        `;
+      } else {
+        // ==========================================
+        // 主界面：极简重点卡片矩阵
+        // ==========================================
+        html += `
+          <main class="max-w-7xl w-full mx-auto px-4 sm:px-6 py-6">
+            ${matchedPkgRows.length > 0 ? `
+              <div class="mb-6 p-4 rounded-2xl bg-indigo-50 border-2 border-indigo-300 space-y-2.5">
+                <div class="text-xs font-extrabold text-indigo-950">🔍 跨代理 Excel 套餐库检索命中 (${matchedPkgRows.length} 条)：</div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  ${matchedPkgRows.slice(0, 8).map(item => `
+                    <div onclick="openAgent('${item.agentId}')" class="p-3 rounded-xl bg-white border border-indigo-200 flex items-center justify-between gap-2 text-xs cursor-pointer hover:bg-indigo-50/60">
+                      <div class="truncate">
+                        <span class="px-2 py-0.5 rounded bg-slate-900 text-white font-mono font-bold mr-1.5">${item.agentId} ${escapeHtml(item.agentName)}</span>
+                        <span class="text-slate-700 font-medium">${escapeHtml(item.summary)}</span>
+                      </div>
+                      <span class="text-indigo-600 font-bold shrink-0">查看/改价 →</span>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            ` : ''}
+
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
+              <div class="flex flex-wrap items-center gap-2">
+                <button onclick="setFilter('all')" class="px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${appState.filter==='all'?'bg-slate-900 text-white':'bg-white text-slate-700 border border-slate-200'}">全部代理 (${total})</button>
+                <button onclick="setFilter('active')" class="px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${appState.filter==='active'?'bg-emerald-600 text-white':'bg-white text-emerald-700 border border-emerald-200'}">🔥 主力活跃 (${activeCount})</button>
+                <button onclick="setFilter('renewal')" class="px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${appState.filter==='renewal'?'bg-amber-600 text-white':'bg-white text-amber-800 border border-amber-200'}">⚠️ 合同待更新 (${renewalCount})</button>
+                <button onclick="setFilter('low_demand')" class="px-3 py-2 rounded-xl text-xs font-bold cursor-pointer ${appState.filter==='low_demand'?'bg-slate-700 text-white':'bg-white text-slate-600 border border-slate-200'}">很少需求·标灰 (${lowDemandCount})</button>
+                <button onclick="setFilter('dormant')" class="px-3 py-2 rounded-xl text-xs font-bold cursor-pointer ${appState.filter==='dormant'?'bg-slate-700 text-white':'bg-white text-slate-500 border border-slate-200'}">一年+无动静 (${dormantCount})</button>
+              </div>
+
+              <select onchange="setSettlementFilter(this.value)" class="px-3 py-2 rounded-xl text-xs font-bold bg-white text-slate-800 border border-slate-200">
+                <option value="all">全部结算方式</option>
+                <option value="套餐结算" ${appState.settlementFilter==='套餐结算'?'selected':''}>套餐结算</option>
+                <option value="流量结算" ${appState.settlementFilter==='流量结算'?'selected':''}>流量结算</option>
+              </select>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              ${filteredAgents.map(a => {
+                const pkgCount = getAgentTotalPkgRows(a);
+                const tblCount = (a.packageTables || []).length;
+                return `
+                  <div onclick="openAgent('${a.id}')" class="bg-white rounded-2xl border-2 ${a.status==='active'?'border-slate-200 hover:border-indigo-600':'border-slate-200/80 bg-slate-50/40 hover:border-slate-400'} p-5 shadow-xs hover:shadow-md transition cursor-pointer flex flex-col justify-between">
+                    <div>
+                      <div class="flex items-start justify-between gap-2">
+                        <div class="flex items-center gap-2">
+                          <span class="px-2.5 py-1 rounded-lg font-mono text-xs font-black ${a.status==='active'?'bg-indigo-600 text-white':'bg-slate-800 text-white'}">${escapeHtml(a.id)}</span>
+                          <h2 class="text-base font-extrabold text-slate-900 line-clamp-1">${escapeHtml(a.name)}</h2>
+                        </div>
+                        <span class="text-[11px] px-2 py-0.5 rounded-full font-bold shrink-0 ${a.status==='active'?'bg-emerald-100 text-emerald-800':a.status==='low_demand'?'bg-slate-200 text-slate-700':'bg-amber-100 text-amber-800'}">
+                          ${a.status==='active'?'主力活跃':a.status==='low_demand'?'很少需求':'一年+无动静'}
+                        </span>
+                      </div>
+
+                      <div class="grid grid-cols-3 gap-2 my-3.5 p-2.5 rounded-xl bg-slate-100 text-center">
+                        <div><div class="text-[10px] text-slate-500">结算方式</div><div class="text-xs font-bold text-slate-900 mt-0.5">${escapeHtml(a.settlement)}</div></div>
+                        <div class="border-x border-slate-200"><div class="text-[10px] text-slate-500">卡费标准</div><div class="text-xs font-bold text-emerald-700 mt-0.5">${escapeHtml(a.cardFee)}</div></div>
+                        <div><div class="text-[10px] text-slate-500">出卡/近况</div><div class="text-xs font-bold text-indigo-700 mt-0.5">${a.totalCardsIssued > 0 ? a.totalCardsIssued + ' 张' : '查看'}</div></div>
+                      </div>
+
+                      <div class="px-3 py-2 rounded-xl text-xs font-bold ${a.needsContractRenewal ? 'bg-amber-50 text-amber-900 border border-amber-200' : 'bg-indigo-50/70 text-indigo-950 border border-indigo-100'}">
+                        <span class="line-clamp-1">${escapeHtml(a.keyAlert)}</span>
+                      </div>
+                    </div>
+
+                    <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+                      <span>📊 套餐表(${tblCount}份/${pkgCount}条) · 出卡(${(a.cardLogs||[]).length})</span>
+                      <span class="text-indigo-600 font-bold">点开查看/改价 →</span>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </main>
+        `;
+      }
+
+      // ==========================================
+      // 文件在线阅览弹窗
+      // ==========================================
+      if (appState.previewFile) {
+        const pf = appState.previewFile;
+        html += `
+          <div class="fixed inset-0 z-50 bg-slate-900/75 flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl max-w-4xl w-full max-h-[88vh] flex flex-col overflow-hidden shadow-2xl">
+              <div class="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
+                <div>
+                  <h3 class="text-sm font-bold">${escapeHtml(pf.name)}</h3>
+                  <p class="text-xs text-slate-400">${escapeHtml(pf.category)} · ${escapeHtml(pf.size)}</p>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button onclick="downloadDoc('${pf.id}')" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold">下载原文件</button>
+                  <button onclick="closePreview()" class="px-3 py-1.5 rounded-lg bg-slate-700 text-white text-xs font-bold">关闭</button>
+                </div>
+              </div>
+              <div class="p-6 overflow-y-auto flex-1 bg-slate-50">
+                ${pf.textContent ? `<pre class="text-xs font-mono whitespace-pre-wrap bg-white p-4 rounded-xl border border-slate-200 leading-relaxed">${escapeHtml(pf.textContent)}</pre>` : `
+                  ${pf.dataUrl && pf.mimeType && pf.mimeType.includes('pdf') ? `<iframe src="${pf.dataUrl}" class="w-full h-[65vh] rounded-lg border"></iframe>` : `
+                    <div class="text-center py-12 text-sm text-slate-600">该文件请点击右上角【下载原文件】查看</div>
+                  `}
+                `}
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      // ==========================================
+      // 全新升级的弹窗：支持直接上传任意格式 .xlsx 套餐表 + 实时预览 + 覆盖更新/追加
+      // ==========================================
+      if (appState.isUploadOpen) {
+        html += `
+          <div class="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+              <div class="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                  <button onclick="switchUploadTab('xlsx_pkg')" class="px-3.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${appState.uploadTab==='xlsx_pkg'?'bg-indigo-500 text-white':'bg-slate-800 text-slate-300'}">📊 上传/更新代理套餐 (.xlsx / .csv)</button>
+                  <button onclick="switchUploadTab('file')" class="px-3.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${appState.uploadTab==='file'?'bg-indigo-500 text-white':'bg-slate-800 text-slate-300'}">📄 上传合同/资料附件</button>
+                </div>
+                <button onclick="closeUploadModal()" class="text-slate-400 hover:text-white text-lg font-bold cursor-pointer">✕</button>
+              </div>
+
+              ${appState.uploadTab === 'xlsx_pkg' ? `
+                <div class="p-6 space-y-4 overflow-y-auto">
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label class="block text-xs font-bold text-slate-700 mb-1">1. 选择导入归属代理商：</label>
+                      <select id="xlsxAgentSelect" onchange="appState.uploadTarget = this.value" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-xs font-bold bg-slate-50">
+                        ${appState.agents.map(a => `<option value="${a.id}" ${a.id===appState.uploadTarget?'selected':''}>${a.id} - ${escapeHtml(a.name)}</option>`).join('')}
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-xs font-bold text-slate-700 mb-1">2. 更新方式（当价格/套餐变动时）：</label>
+                      <select id="xlsxModeSelect" onchange="appState.xlsxImportMode = this.value" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-xs font-bold bg-slate-50">
+                        <option value="replace" ${appState.xlsxImportMode==='replace'?'selected':''}>🔄 覆盖更新该代理现有套餐表（推荐用于价格更新）</option>
+                        <option value="append" ${appState.xlsxImportMode==='append'?'selected':''}>➕ 追加为该代理的新套餐表（保留旧表）</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="border-2 border-dashed border-indigo-300 hover:border-indigo-500 bg-indigo-50/40 rounded-2xl p-6 text-center transition">
+                    <input type="file" id="xlsxPkgInput" accept=".xlsx,.xls,.csv" class="hidden" onchange="handleXlsxFileSelected(event)" />
+                    <button onclick="document.getElementById('xlsxPkgInput').click()" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs sm:text-sm font-extrabold shadow-xs cursor-pointer">
+                      📂 点击选择代理套餐 Excel 文件 (.xlsx / .xls / .csv)
+                    </button>
+                    <p class="text-xs text-slate-500 mt-2">
+                      无需统一格式！系统会自动识别该代理 Excel 表格原本的列标题（如国家、天数、流量、结算价、FUP等），并在网页内生成可随时搜索和直接点击改价的动态表格。
+                    </p>
+                  </div>
+
+                  ${appState.pendingXlsxSheets && appState.pendingXlsxSheets.length > 0 ? `
+                    <div class="p-4 rounded-xl bg-emerald-50 border border-emerald-200 space-y-3">
+                      <div class="flex items-center justify-between">
+                        <span class="text-xs font-extrabold text-emerald-900">
+                          ✅ 已解析文件：《${escapeHtml(appState.pendingXlsxFileName)}》，包含 ${appState.pendingXlsxSheets.length} 个工作表：
+                        </span>
+                      </div>
+                      <div class="space-y-2 max-h-56 overflow-y-auto">
+                        ${appState.pendingXlsxSheets.map((sh, sIdx) => `
+                          <div class="p-3 rounded-lg bg-white border border-emerald-200 text-xs">
+                            <div class="font-bold text-slate-900 mb-1">📑 工作表：${escapeHtml(sh.sheetName)} （共 ${sh.rows.length} 行套餐数据）</div>
+                            <div class="text-slate-500 truncate">识别到的表头列：${sh.headers.map(h => `<span class="px-1.5 py-0.5 bg-slate-100 rounded mr-1 text-slate-700 font-semibold">${escapeHtml(h)}</span>`).join('')}</div>
+                          </div>
+                        `).join('')}
+                      </div>
+                    </div>
+                  ` : ''}
+
+                  <div class="flex justify-end gap-2 pt-2">
+                    <button onclick="closeUploadModal()" class="px-4 py-2 rounded-xl border border-slate-300 text-xs font-bold text-slate-600 cursor-pointer">取消</button>
+                    <button onclick="confirmXlsxImport()" ${!appState.pendingXlsxSheets || appState.pendingXlsxSheets.length===0 ? 'disabled' : ''} class="px-5 py-2 rounded-xl ${appState.pendingXlsxSheets && appState.pendingXlsxSheets.length>0 ? 'bg-indigo-600 hover:bg-indigo-500 cursor-pointer' : 'bg-slate-300 cursor-not-allowed'} text-white text-xs font-extrabold">
+                      确认导入并展示套餐表
+                    </button>
+                  </div>
+                </div>
+              ` : `
+                <div class="p-6 space-y-4">
+                  <div class="grid grid-cols-2 gap-3">
+                    <div>
+                      <label class="block text-xs font-bold text-slate-700 mb-1">归属代理商：</label>
+                      <select id="fileAgentSelect" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold">
+                        ${appState.agents.map(a => `<option value="${a.id}" ${a.id===appState.uploadTarget?'selected':''}>${a.id} - ${escapeHtml(a.name)}</option>`).join('')}
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-xs font-bold text-slate-700 mb-1">文件分类：</label>
+                      <select id="fileCategorySelect" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold">
+                        <option value="合同文件">📄 合同文件</option>
+                        <option value="资质证件">🏢 营业执照/资质</option>
+                        <option value="操作规范">📌 操作规范/交接</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="border-2 border-dashed border-indigo-200 bg-indigo-50/50 rounded-2xl p-8 text-center">
+                    <input type="file" id="localFileInput" class="hidden" onchange="handleFileChosen(event)" />
+                    <button onclick="document.getElementById('localFileInput').click()" class="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold shadow-xs cursor-pointer">选择电脑中的合同/文件上传</button>
+                    <p class="text-xs text-slate-500 mt-2">支持 PDF 合同、图片、TXT、CSV 等格式</p>
+                  </div>
+                </div>
+              `}
+            </div>
+          </div>
+        `;
+      }
+
+      root.innerHTML = html;
+
+      // 绑定全局搜索输入保持焦点
+      const searchInput = document.getElementById('globalSearch');
+      if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+          appState.search = e.target.value;
+          const pos = e.target.selectionStart;
+          render();
+          const nextInput = document.getElementById('globalSearch');
+          if (nextInput) { nextInput.focus(); nextInput.setSelectionRange(pos, pos); }
+        });
+      }
+
+      // 绑定代理详情页内套餐搜索输入保持焦点
+      const pkgInput = document.getElementById('agentPkgSearchInput');
+      if (pkgInput) {
+        pkgInput.addEventListener('input', (e) => {
+          appState.pkgSearchInAgent = e.target.value;
+          const pos = e.target.selectionStart;
+          render();
+          const nextPkgInput = document.getElementById('agentPkgSearchInput');
+          if (nextPkgInput) { nextPkgInput.focus(); nextPkgInput.setSelectionRange(pos, pos); }
+        });
+      }
+    }
+
+    // ==========================================
+    // 交互与 Excel (.xlsx) 自适应解析逻辑
+    // ==========================================
+    function setFilter(f) { appState.filter = f; render(); }
+    function setSettlementFilter(f) { appState.settlementFilter = f; render(); }
+    function openAgent(id) { appState.activeAgentId = id; appState.pkgSearchInAgent = ''; window.scrollTo(0, 0); render(); }
+    function closeAgent() { appState.activeAgentId = null; render(); }
+    function clearSearch() { appState.search = ''; render(); }
+    function closePreview() { appState.previewFile = null; render(); }
+
+    function openUploadModal(tab) {
+      appState.uploadTab = tab || 'xlsx_pkg';
+      if (appState.activeAgentId) appState.uploadTarget = appState.activeAgentId;
+      appState.pendingXlsxSheets = null;
+      appState.pendingXlsxFileName = '';
+      appState.isUploadOpen = true;
+      render();
+    }
+
+    function closeUploadModal() {
+      appState.isUploadOpen = false;
+      appState.pendingXlsxSheets = null;
+      render();
+    }
+
+    function switchUploadTab(t) {
+      appState.uploadTab = t;
+      render();
+    }
+
+    function openXlsxModalForAgent(agentId) {
+      appState.uploadTarget = agentId;
+      appState.uploadTab = 'xlsx_pkg';
+      appState.pendingXlsxSheets = null;
+      appState.pendingXlsxFileName = '';
+      appState.isUploadOpen = true;
+      render();
+    }
+
+    function openFileModalForAgent(agentId) {
+      appState.uploadTarget = agentId;
+      appState.uploadTab = 'file';
+      appState.isUploadOpen = true;
+      render();
+    }
+
+    // 解析上传的任意格式 .xlsx / .xls / .csv
+    function handleXlsxFileSelected(e) {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+
+      if (typeof XLSX === 'undefined') {
+        alert('Excel 解析组件正在加载，请检查网络或稍后再试');
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        try {
+          const data = new Uint8Array(evt.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const parsedSheets = [];
+
+          workbook.SheetNames.forEach(sheetName => {
+            const ws = workbook.Sheets[sheetName];
+            const matrix = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+            // 过滤掉全空行
+            const nonEmptyRows = matrix.filter(row => Array.isArray(row) && row.some(cell => String(cell).trim() !== ''));
+            if (nonEmptyRows.length > 0) {
+              // 自动寻找有效表头行（默认第一行非空行为表头）
+              const rawHeaders = nonEmptyRows[0].map((h, i) => String(h).trim() || `列${i + 1}`);
+              const dataRows = nonEmptyRows.slice(1).map(r => rawHeaders.map((_, cIdx) => (r[cIdx] !== undefined && r[cIdx] !== null ? String(r[cIdx]).trim() : '')));
+              parsedSheets.push({
+                id: 'TBL-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+                fileName: file.name,
+                sheetName: sheetName,
+                updatedAt: new Date().toISOString().slice(0, 10),
+                headers: rawHeaders,
+                rows: dataRows
+              });
+            }
+          });
+
+          if (parsedSheets.length === 0) {
+            showToast('该 Excel 文件中没有检测到有效数据行');
+            return;
+          }
+
+          appState.pendingXlsxFileName = file.name;
+          appState.pendingXlsxSheets = parsedSheets;
+          render();
+        } catch (err) {
+          console.error(err);
+          alert('解析 Excel 文件失败，请确认文件未加密且为标准 .xlsx/.xls/.csv 格式');
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    // 确认导入解析好的 Excel 套餐表到指定代理并立即打开该代理查看
+    function confirmXlsxImport() {
+      if (!appState.pendingXlsxSheets || appState.pendingXlsxSheets.length === 0) return;
+      const targetId = appState.uploadTarget;
+      const mode = appState.xlsxImportMode;
+      const agent = appState.agents.find(a => a.id === targetId);
+      if (!agent) return;
+
+      if (mode === 'replace') {
+        agent.packageTables = [...appState.pendingXlsxSheets];
+      } else {
+        agent.packageTables = [...(agent.packageTables || []), ...appState.pendingXlsxSheets];
+      }
+
+      saveState();
+      appState.isUploadOpen = false;
+      appState.activeAgentId = targetId;
+      const importedRowCount = appState.pendingXlsxSheets.reduce((s, tbl) => s + tbl.rows.length, 0);
+      appState.pendingXlsxSheets = null;
+      showToast(`已成功更新 ${targetId} (${agent.name}) 的套餐表，共 ${importedRowCount} 条套餐！`);
+    }
+
+    // 在网页内直接点击单元格修改套餐价格或信息（实时自动保存）
+    function updatePkgCellValue(agentId, tableIdx, rowIdx, colIdx, newText) {
+      const agent = appState.agents.find(a => a.id === agentId);
+      if (!agent || !agent.packageTables || !agent.packageTables[tableIdx]) return;
+      const tbl = agent.packageTables[tableIdx];
+      if (!tbl.rows[rowIdx]) return;
+      const cleanVal = String(newText || '').trim();
+      if (tbl.rows[rowIdx][colIdx] === cleanVal) return;
+      tbl.rows[rowIdx][colIdx] = cleanVal;
+      tbl.updatedAt = new Date().toISOString().slice(0, 10);
+      saveState();
+      showToast(`已自动保存修改：${cleanVal}`);
+    }
+
+    // 在现有套餐表中新增一行
+    function addRowToPkgTable(agentId, tableIdx) {
+      const agent = appState.agents.find(a => a.id === agentId);
+      if (!agent || !agent.packageTables || !agent.packageTables[tableIdx]) return;
+      const tbl = agent.packageTables[tableIdx];
+      const emptyRow = tbl.headers.map(() => '点击填写');
+      tbl.rows.unshift(emptyRow);
+      tbl.updatedAt = new Date().toISOString().slice(0, 10);
+      saveState();
+      render();
+      showToast('已在顶部新增一行，直接点击单元格即可输入套餐与价格');
+    }
+
+    // 删除某一行套餐
+    function deleteRowFromPkgTable(agentId, tableIdx, rowIdx) {
+      const agent = appState.agents.find(a => a.id === agentId);
+      if (!agent || !agent.packageTables || !agent.packageTables[tableIdx]) return;
+      agent.packageTables[tableIdx].rows.splice(rowIdx, 1);
+      saveState();
+      render();
+      showToast('已删除该行套餐');
+    }
+
+    // 删除整张套餐表
+    function deletePkgTable(agentId, tableIdx) {
+      if (!confirm('确定要删除这张套餐表吗？')) return;
+      const agent = appState.agents.find(a => a.id === agentId);
+      if (!agent || !agent.packageTables) return;
+      agent.packageTables.splice(tableIdx, 1);
+      saveState();
+      render();
+      showToast('已删除该套餐表');
+    }
+
+    // 将网页内修改过价格的套餐表一键重新导出为标准 .xlsx
+    function exportSinglePkgTableToXlsx(agentId, tableIdx) {
+      const agent = appState.agents.find(a => a.id === agentId);
+      if (!agent || !agent.packageTables || !agent.packageTables[tableIdx]) return;
+      const tbl = agent.packageTables[tableIdx];
+      if (typeof XLSX === 'undefined') return;
+      const aoa = [tbl.headers, ...tbl.rows];
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, tbl.sheetName || '套餐报价表');
+      XLSX.writeFile(wb, `${agent.id}_${agent.name}_最新套餐表_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      showToast('已导出最新套餐 Excel 文件');
+    }
+
+    function previewDoc(id) {
+      const f = appState.files.find(x => x.id === id);
+      if (f) { appState.previewFile = f; render(); }
+    }
+
+    function downloadDoc(id) {
+      const f = appState.files.find(x => x.id === id);
+      if (!f) return;
+      if (f.dataUrl) {
+        const a = document.createElement('a');
+        a.href = f.dataUrl;
+        a.download = f.name;
+        a.click();
+      } else if (f.textContent) {
+        const blob = new Blob(['\uFEFF' + f.textContent], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = f.name;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+      showToast(`正在下载：${f.name}`);
+    }
+
+    function handleFileChosen(e) {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const targetAgent = document.getElementById('fileAgentSelect').value;
+      const targetCategory = document.getElementById('fileCategorySelect').value;
+      const isText = file.type.includes('text') || file.name.endsWith('.txt') || file.name.endsWith('.csv');
+
+      const reader = new FileReader();
+      if (isText) {
+        reader.onload = (evt) => {
+          appState.files.unshift({
+            id: 'FILE-' + Date.now(),
+            agentId: targetAgent,
+            name: file.name,
+            category: targetCategory,
+            size: (file.size / 1024).toFixed(1) + ' KB',
+            uploadDate: new Date().toISOString().slice(0, 10),
+            textContent: evt.target.result
+          });
+          saveState();
+          appState.isUploadOpen = false;
+          showToast(`已上传文件 ${file.name}`);
+        };
+        reader.readAsText(file, 'utf-8');
+      } else {
+        reader.onload = (evt) => {
+          appState.files.unshift({
+            id: 'FILE-' + Date.now(),
+            agentId: targetAgent,
+            name: file.name,
+            category: targetCategory,
+            size: (file.size / 1024).toFixed(1) + ' KB',
+            uploadDate: new Date().toISOString().slice(0, 10),
+            dataUrl: evt.target.result,
+            mimeType: file.type
+          });
+          saveState();
+          appState.isUploadOpen = false;
+          showToast(`已上传文件 ${file.name}`);
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+
+    function promptAddCard(agentId) {
+      const qtyStr = prompt(`请输入本次为 ${agentId} 出卡的数量（张）：`, '100');
+      if (qtyStr === null) return;
+      const qty = parseInt(qtyStr, 10) || 0;
+      const desc = prompt('请输入出卡说明或关联套餐：', '批量出卡出货');
+      const agent = appState.agents.find(a => a.id === agentId);
+      if (agent) {
+        agent.totalCardsIssued = (Number(agent.totalCardsIssued)||0) + qty;
+        agent.cardLogs = agent.cardLogs || [];
+        agent.cardLogs.unshift({
+          id: 'LOG-' + Date.now(),
+          date: new Date().toISOString().slice(0, 10),
+          type: '出卡记录',
+          quantity: qty,
+          pkgName: desc || '出卡',
+          note: '手动登记出卡流水'
+        });
+        saveState();
+        showToast(`已为 ${agentId} 增加 ${qty} 张出卡记录`);
+      }
+    }
+
+    function exportBackup() {
+      const str = JSON.stringify({ agents: appState.agents, files: appState.files }, null, 2);
+      const blob = new Blob([str], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `SCT_代理工作台全量备份_${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('已导出全量数据备份 (.json)');
+    }
+
+    function restoreBackup(e) {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        try {
+          const parsed = JSON.parse(evt.target.result);
+          if (Array.isArray(parsed.agents)) appState.agents = parsed.agents;
+          if (Array.isArray(parsed.files)) appState.files = parsed.files;
+          saveState();
+          render();
+          showToast('已成功恢复全量备份数据！');
+        } catch (err) {
+          alert('备份文件格式错误');
+        }
+      };
+      reader.readAsText(file, 'utf-8');
+    }
+
+    render();
+  </script>
+</body>
+</html>
